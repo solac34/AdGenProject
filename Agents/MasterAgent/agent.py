@@ -1,35 +1,31 @@
 from google.adk.agents.llm_agent import Agent
+from DataAnalyticAgent.agent import data_analytic_agent
 
 
-def event_checker(user_id, event_count):
-    return "event_checker"
-
-def order_checker(user_id, order_count):
-    return "order_checker"
-
-
-def request_data_analytic_agent(user_id, event_count, order_count):
-    return "request_data_analytic_agent"
-
-def request_creative_agent(segmentation_id):
-    return "request_creative_agent"
-
-def request_marketing_agent(segmentation_id):
-    return "request_marketing_agent"
+def segmentation_result_displayer(segmentation_result: dict):
+    print(segmentation_result)
+    return "segmentation result displayed"
 
 MASTER_AGENT_INSTRUCTION = """
 You are the chief executive of an agent team. 
 You are responsible for coordinating the work of the agents.
 You are responsible for the overall success of the agent team.
 You are responsible for the overall performance of the agent team.
-You will be ran each hour and you will do the following:
-1.Tell data analytic agent to retrieve the events table and group by user id and get the number of events for each user.
-2.You will use  event_checker tool to check if are there any new users or if any users event counts is increased at least the count of C.
-3.You will use order_checker tool to check if are there any new orders or if any users order counts is increased at least the count of O.
-4.You will give new users and increased event users, basically the user_id data and their ALL EVENTS AND ORDERS to the data analytic agent and demand a segmentation.
-5.After getting the segmentation results, you will give each segmentation to creative_agent to get creative arts for each segmentation.
-6.you will save each segmentation result to firestore by segmentation_id, segmentation_payload, segmentation_creativeImageUrl
-7.you will run marketing agent to update marketings. 
+You will be ran each hour and whenever you told 'do your task' you will do the following:
+
+First Step:
+1. Tell data_analytic_agent to get current event counts for each user using retrieve_event_counts tool.
+2. You will be given a json object with user_id and event_count pairs (current counts).
+3. Tell data_analytic_agent to compare these current counts with past counts using compare_event_counts tool.
+4. You will get a list of user_id's (users that are new or have increased events) to be segmented.
+5. Tell data_analytic_agent to write these new counts to firestore using write_new_events_to_firestore tool.
+6. If to be segmented user_id's list is empty, finish your task and return 'no new events'.
+
+Second Step:
+1. Provide to be segmented user_id list given to you in previous step to data_analytic_agent.
+2. Tell your agent to segmentate each user using single_user_segmentation tool of theirs.
+3. You will be given a json object with user_id and segmentation_result pairs. 
+4. Pass given json to segmentation_result_displayer tool.
 """
 
 MASTER_AGENT_DESCRIPTION = """
@@ -41,4 +37,13 @@ master_agent = Agent(
     name='master_agent',
     description=MASTER_AGENT_DESCRIPTION,
     instruction=MASTER_AGENT_INSTRUCTION,
+    tools=[
+        segmentation_result_displayer,
+    ],
+    sub_agents=[
+        data_analytic_agent,
+    ]
 )
+
+# Projenin kök ajanı (root) master_agent'tir
+root_agent = master_agent

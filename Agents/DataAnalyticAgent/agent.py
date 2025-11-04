@@ -1,6 +1,9 @@
 from google.adk.agents.llm_agent import Agent
 from .bq_helper import bq_to_dataframe
 import os
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+from MasterAgent.firestore_helper import get_firestore_client
 
 # Ortam değişkenlerini .env formatına uyarlama
 # - ADK/genai Client Vertex AI için GOOGLE_CLOUD_PROJECT ve GOOGLE_CLOUD_LOCATION bekliyor
@@ -106,6 +109,67 @@ def retrieve_event_counts():
 def retrieve_users(): 
     return "users"
 
+def get_an_hour_ago_event_counts():
+    """
+    Firestore'dan bir saat önceki 'user_event_counts' koleksiyonunu okur ve 
+    user_id:event_count dictionary olarak döner.
+    """
+    db = get_firestore_client()
+    collection_ref = db.collection('user_event_counts')
+    docs = collection_ref.stream()
+    
+    result = {}
+    for doc in docs:
+        data = doc.to_dict()
+        # Native Python tipine dönüştür - JSON serialize için
+        result[str(doc.id)] = int(data.get('count', data.get('event_count', 0)))
+    
+    return result
+
+def write_new_events_to_firestore(user2event_count: dict):
+    """
+    Yeni event count'larını Firestore'a yazar.
+    """
+    db = get_firestore_client()
+    collection_ref = db.collection('user_event_counts')
+    
+    written_count = 0
+    for user_id, event_count in user2event_count.items():
+        collection_ref.document(str(user_id)).set({
+            'count': int(event_count)
+        })
+        written_count += 1
+
+    return f"{written_count} user event counts written to firestore"
+
+def write_segmentation_results_to_firestore(segmentation_results: dict):
+    db = get_firestore_client()
+    collection_ref = db.collection('segmentation_results')
+    for user_id, segmentation_result in segmentation_results.items():
+        collection_ref.document(str(user_id)).set({
+            'user_id': user_id,
+            'segmentation_result': segmentation_result
+        })
+    return f"{len(segmentation_results)} segmentation results written to firestore"
+
+def compare_event_counts(current_user2event_count: dict):
+    """
+    Mevcut event count'ları Firestore'daki geçmiş verilerle karşılaştırır.
+    Yeni veya event sayısı artan kullanıcıların listesini döner.
+    """
+    past_events = get_an_hour_ago_event_counts()
+    new_or_increased_users = []
+    
+    for user_id, event_count in current_user2event_count.items():
+        user_id_str = str(user_id)
+        event_count_int = int(event_count)
+        # Yeni user veya event sayısı artmış user
+        if user_id_str not in past_events or event_count_int > past_events[user_id_str]:
+            new_or_increased_users.append(user_id_str)
+    
+    return new_or_increased_users
+
+
 DATA_ANALYTIC_AGENT_INSTRUCTION = """
 You are senior data scientist. You are in this role for the adgen project. Adgen project is designed to tailor ads for different segmentated users and  show those ads in a webapp, currently adg-ecommerce.
 You will be given a request by master agent to retrieve the events or orders, segmentate it based on users, retrieve the users data from bigtable, and return the results to master agent.
@@ -126,17 +190,11 @@ You have these tools that will cover you up for everything that will be asked an
 2c.order_date is when the order happened. yyyy-mm-dd hh:mm:ss format.
 2d.order_amount is the amount of the order.
 
+3.compare_event_counts tool to compare past events and current events 
+3a. this tool gets an input of current user2event_count pairs. You may take this input from retrieve_event_counts tool.
+3b. this tool returns a list of user_id's that are new or have increased events.
+
 GUIDES:
-When asked to get last hours events: 
-1.Use retrieve_event_counts tool to retrieve the all events from the bigquery table. 
-2.Return the results with user_id:event_count pairs.
-
-When asked to get last hours orders: 
-1.Use retrieve_order_counts tool to retrieve the all orders from the bigquery table. 
-1b.Return the results with user_id:order_count pairs.
-2.Group by user_id and get the number of orders for each user.
-3.Return the results with user_id:order_count pairs.
-
 When asked to segmentate the users:
 1.You will be given the user_id list.  
 2.For each user id using retrieve_single_user_data tool retrieve all events and orders for the user.
@@ -155,12 +213,11 @@ When asked to segmentate the users:
 
 USUAL FLOW:
 Even though the flow may change, your main flow is:
-1.Send a request to bigquery to retrieve the events and orders data using retrieve_event_counts and retrieve_order_counts tools.
-2.First return to the master agent, you will return the final dataframes of events and the orders, and your main return is user_id:event_count pairs and user_id:order_count pairs.
-3.Master agent will check if there are any new users or if any users event counts is increased at least the count of C or order counts is increased at least the count of O.
-4.If there are any new users or if any users event counts is increased at least the count of C or order counts is increased at least the count of O, master agent will give the user_id list to you to segmentate the users.
-5.You will segmentate the users and return the segmentation results to master agent.
-5b.You will return segmentation_id and the payloads to master agent.
+1.Send a request to bigquery to retrieve the events and orders data using retrieve_event_counts and retrieve_order_counts tools.Directly pass the results to compare_event_counts tool.
+2.You will get a list of user_id's that are new or have increased events.
+3.If the list is empty, finish your task and return 'no new events'.
+4.If the list is not empty, segmentate each user using single_user_segmentation tool and return the segmentation results to write_segmentation_results_to_firestore tool.
+5.You will return segmentation_id's to master agent.
 """ 
 
 DATA_ANALYTIC_AGENT_DESCRIPTION = """
@@ -178,10 +235,12 @@ data_analytic_agent = Agent(
         retrieve_order_counts, 
         retrieve_users, 
         retrieve_event_counts,
-        retrieve_single_user_data
+        retrieve_single_user_data,
+        get_an_hour_ago_event_counts,
+        write_new_events_to_firestore,
+        compare_event_counts
     ],
 )
 
-# ADK web için root_agent export et
-root_agent = data_analytic_agent
+# Bu modülde yalnızca alt ajan tanımlanır; root ajan MasterAgent tarafında belirlenir.
 
