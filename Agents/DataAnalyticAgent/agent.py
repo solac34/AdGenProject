@@ -20,28 +20,59 @@ if os.getenv('GOOGLE_GENAI_USE_VERTEXAI', '').lower() in ['true', '1']:
         os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = os.getenv('GOOGLE_APPLICATION_CREDENTIALS_AI', '')
 
 def retrieve_single_user_data(user_id: str): 
+    """
+    Tek bir kullanıcının event ve order verilerini alır.
+    Token limitini aşmamak için son 100 event ve 50 order ile sınırlandırılmış.
+    """
     events_df = bq_to_dataframe(f"""
     SELECT * FROM `adgen_bq.user_events`
     WHERE user_id = '{user_id}'
+    ORDER BY event_time DESC
+    LIMIT 100
     """)
 
     orders_df = bq_to_dataframe(f"""
     SELECT * FROM `adgen_bq.user_orders`
     WHERE user_id = '{user_id}'
+    ORDER BY order_date DESC
+    LIMIT 50
     """)
 
-    print(events_df.columns)
-    print(orders_df.columns)
+    if 'event_id' in events_df.columns:
+        events_df = events_df.drop(columns=['event_id'])
+    if 'order_id' in orders_df.columns:
+        orders_df = orders_df.drop(columns=['order_id'])
 
-    events_df.drop(columns=['event_id'], inplace=True)
-    orders_df.drop(columns=['order_id'], inplace=True)
+    # Native Python tipine dönüştür
+    events_records = events_df.to_dict(orient='records')
+    orders_records = orders_df.to_dict(orient='records')
+    
+    # Timestamp ve numpy tiplerini standart Python tiplerine dönüştür
+    for event in events_records:
+        for key, value in event.items():
+            if hasattr(value, 'item'):  # numpy tipi
+                event[key] = value.item()
+            elif hasattr(value, 'isoformat'):  # datetime
+                event[key] = value.isoformat()
+                
+    for order in orders_records:
+        for key, value in order.items():
+            if hasattr(value, 'item'):  # numpy tipi
+                order[key] = value.item()
+            elif hasattr(value, 'isoformat'):  # datetime
+                order[key] = value.isoformat()
 
     return {
-        'events': events_df.to_dict(orient='records'),
-        'orders': orders_df.to_dict(orient='records')
+        'events': events_records,
+        'orders': orders_records,
+        'summary': f"{len(events_records)} events, {len(orders_records)} orders"
     }
 
 def retrieve_events(user_id: list = [], event_name: str = "", event_time: str = "", path_name: str = "", payload: dict = {}, event_location: str = ""): 
+    """
+    Filtrelere göre event'leri getirir.
+    Token limitini aşmamak için 200 kayıtla sınırlandırılmış.
+    """
     conditions = []
 
     if len(user_id) > 0:
@@ -63,11 +94,26 @@ def retrieve_events(user_id: list = [], event_name: str = "", event_time: str = 
     df = bq_to_dataframe(f"""
     SELECT * FROM `adgen_bq.user_events`
     {where_clause}
+    ORDER BY event_time DESC
+    LIMIT 200
     """)
-    # ADK tool sonuçları JSON-serialize edilebilir olmalı
-    return df.to_dict(orient='records')
+    
+    records = df.to_dict(orient='records')
+    # Native Python tipine dönüştür
+    for record in records:
+        for key, value in record.items():
+            if hasattr(value, 'item'):
+                record[key] = value.item()
+            elif hasattr(value, 'isoformat'):
+                record[key] = value.isoformat()
+    
+    return records
 
 def retrieve_orders(user_id: list = [], order_date: str = "", order_amount: float = -999999.0): 
+    """
+    Filtrelere göre order'ları getirir.
+    Token limitini aşmamak için 100 kayıtla sınırlandırılmış.
+    """
     conditions = []
 
     if len(user_id) > 0:
@@ -83,27 +129,50 @@ def retrieve_orders(user_id: list = [], order_date: str = "", order_amount: floa
     df = bq_to_dataframe(f"""
     SELECT * FROM `adgen_bq.user_orders`
     {where_clause}
+    ORDER BY order_date DESC
+    LIMIT 100
     """)
-    # ADK tool sonuçları JSON-serialize edilebilir olmalı
-    return df.to_dict(orient='records')
+    
+    records = df.to_dict(orient='records')
+    # Native Python tipine dönüştür
+    for record in records:
+        for key, value in record.items():
+            if hasattr(value, 'item'):
+                record[key] = value.item()
+            elif hasattr(value, 'isoformat'):
+                record[key] = value.isoformat()
+    
+    return records
 
 def retrieve_order_counts(): 
-    
+    """
+    BigQuery'den order count'ları alır.
+    Token limitini aşmamak için son 500 aktif kullanıcıyla sınırlandırılmış.
+    """
     df = bq_to_dataframe(f"""
     SELECT user_id, COUNT(*) as count FROM `adgen_bq.user_orders`
     GROUP BY user_id
+    ORDER BY count DESC
+    LIMIT 500
     """)
     records = df.to_dict(orient='records')
-    return {r.get('user_id'): r.get('count') for r in records}
+    # Native Python tipine dönüştür - JSON serialize ve token optimizasyonu için
+    return {str(r.get('user_id')): int(r.get('count')) for r in records}
 
 def retrieve_event_counts(): 
-    
+    """
+    BigQuery'den event count'ları alır.
+    Token limitini aşmamak için son 500 aktif kullanıcıyla sınırlandırılmış.
+    """
     df = bq_to_dataframe(f"""
     SELECT user_id, COUNT(*) as count FROM `adgen_bq.user_events`
     GROUP BY user_id
+    ORDER BY count DESC
+    LIMIT 500
     """)
     records = df.to_dict(orient='records')
-    return {r.get('user_id'): r.get('count') for r in records}
+    # Native Python tipine dönüştür - JSON serialize ve token optimizasyonu için
+    return {str(r.get('user_id')): int(r.get('count')) for r in records}
 
 
 def retrieve_users(): 
@@ -113,10 +182,12 @@ def get_an_hour_ago_event_counts():
     """
     Firestore'dan bir saat önceki 'user_event_counts' koleksiyonunu okur ve 
     user_id:event_count dictionary olarak döner.
+    Token limitini aşmamak için son 1000 kayıtla sınırlandırılmış.
     """
     db = get_firestore_client()
     collection_ref = db.collection('user_event_counts')
-    docs = collection_ref.stream()
+    # Token limitini aşmamak için limit koy
+    docs = collection_ref.limit(1000).stream()
     
     result = {}
     for doc in docs:
@@ -171,53 +242,77 @@ def compare_event_counts(current_user2event_count: dict):
 
 
 DATA_ANALYTIC_AGENT_INSTRUCTION = """
-You are senior data scientist. You are in this role for the adgen project. Adgen project is designed to tailor ads for different segmentated users and  show those ads in a webapp, currently adg-ecommerce.
-You will be given a request by master agent to retrieve the events or orders, segmentate it based on users, retrieve the users data from bigtable, and return the results to master agent.
-You have these tools that will cover you up for everything that will be asked and help you:
-1.'retrieve_events' tool to retrieve the events from the bigquery table with given user_id list and different parameters. 
-1a.event_id is the unique identifier of the event.
-1b.session_id parameter is a string with session_id to retrieve the events for a specific session.
-1c.user_id parameter is a list where you will pass the user_id list to retrieve the events for each user.
-1d.event_name parameter is a string with event names such as cart_clicked or page_view. 
-1e. event_time is when the event happened. yyyy-mm-dd hh:mm:ss format.
-1f. path_name is the path of the page where the event happened.
-1g. payload is the payload of the event.
-1h. event_location is the location of the event.
+You are a Senior Data Scientist for the AdGen project.
+Your role: Analyze user behavior from BigQuery and Firestore, create personalized user segments for targeted advertising.
 
-2.'retrieve_orders' tool to retrieve the orders from the bigquery table with given user_id list and different parameters.
-2a.order_id is the unique identifier of the order.
-2b.user_id parameter is a list where you will pass the user_id list to retrieve the orders for each user. user_id is string in the table but the tool takes input as a list of strings.
-2c.order_date is when the order happened. yyyy-mm-dd hh:mm:ss format.
-2d.order_amount is the amount of the order.
+=== YOUR TOOLS ===
 
-3.compare_event_counts tool to compare past events and current events 
-3a. this tool gets an input of current user2event_count pairs. You may take this input from retrieve_event_counts tool.
-3b. this tool returns a list of user_id's that are new or have increased events.
+📊 Data Retrieval Tools:
+1. retrieve_event_counts() → Get current event counts from BigQuery (top 500 active users)
+2. retrieve_order_counts() → Get order counts from BigQuery (top 500 active users)
+3. retrieve_events(user_id[], event_name, event_time, path_name, payload, event_location) → Filter specific events
+4. retrieve_orders(user_id[], order_date, order_amount) → Filter specific orders
+5. retrieve_single_user_data(user_id) → Get detailed events & orders for ONE user (last 100 events, 50 orders)
+6. retrieve_users() → Get user list
 
-GUIDES:
-When asked to segmentate the users:
-1.You will be given the user_id list.  
-2.For each user id using retrieve_single_user_data tool retrieve all events and orders for the user.
-4. Analysis each event and order for given user and segmentate them.
-4a.While segmentating, check what events user did, what products they bought, added to cart, etc.
-4b. Check user's orders table to see what they spend the money, what they bought, etc.
-4c. Check user's profile from firestore users table to see their location, compare it with event and order locations, and completely segmentate users.
-4d. The segmentation finally should return an explanation of user, e.g. 'user  is from US, usually buys products from US, currently in Paris and bought lover products so user must be with the partner in a holiday with paris. Checked products are for winter and for age group between 18-30.'. You may add new analyses to this segmentation. 
-4e. Also create another segmentation which is less complex, user's main location, current location, looks for the gifts or not, what they add to the cart, what they removed from the cart and what they bought.
-4f. Final segmentation (complex one) should be in a way that other llm agent will understand the given segmentation. 
-4g. Final segmentation (less complex one) should be in a way that other llm agent will understand the given segmentation. 
-4h. Return this: segmentation_id, segmentation_userLevel_payload, segmentation_segmLevel_payload
-4i. segmentation_id is a unique identifier for the segmentation.
-4j. segmentation_userLevel_payload is the payload of the user level segmentation. (done in 4d)
-4k. segmentation_segmLevel_payload is the payload of the segmentation level segmentation. (done in 4e)
+🔍 Analysis Tools:
+7. get_an_hour_ago_event_counts() → Fetch past event counts from Firestore (for comparison)
+8. compare_event_counts(current_counts_dict) → Compare current vs past, return new/active user_ids
+   - Input: {"user_123": 45, "user_456": 78}
+   - Output: ["user_123", "user_789"] (new or increased activity)
 
-USUAL FLOW:
-Even though the flow may change, your main flow is:
-1.Send a request to bigquery to retrieve the events and orders data using retrieve_event_counts and retrieve_order_counts tools.Directly pass the results to compare_event_counts tool.
-2.You will get a list of user_id's that are new or have increased events.
-3.If the list is empty, finish your task and return 'no new events'.
-4.If the list is not empty, segmentate each user using single_user_segmentation tool and return the segmentation results to write_segmentation_results_to_firestore tool.
-5.You will return segmentation_id's to master agent.
+💾 Storage Tools:
+9. write_new_events_to_firestore(user2event_count_dict) → Save current counts to Firestore
+10. write_segmentation_results_to_firestore(segmentation_results_dict) → Save segments
+
+=== WORKFLOW RESPONSES ===
+
+When Master Agent asks you to:
+
+📌 "retrieve current event counts"
+→ Use retrieve_event_counts()
+→ Return: {"user_id": count, ...}
+
+📌 "compare counts with past data" + passes counts
+→ Use compare_event_counts(counts)
+→ Return: ["user_id1", "user_id2", ...] (list of new/active users)
+
+📌 "write counts to firestore" + passes counts
+→ Use write_new_events_to_firestore(counts)
+→ Return: confirmation message
+
+📌 "segmentate these users" + passes user_id list
+→ For EACH user_id:
+  1. Call retrieve_single_user_data(user_id)
+  2. Analyze their behavior:
+     - Events: page_view, cart_add, cart_remove, checkout, purchase
+     - Orders: what they bought, spending patterns
+     - Location: home vs current location
+     - Product preferences: categories, price range, seasonality
+  
+  3. Create TWO-LEVEL segmentation:
+     
+     a) DETAILED (segmentation_userLevel_payload):
+        "User from NYC, 25-35 age group, high spender ($500+/month). Currently in Paris. 
+        Recent purchases: winter jackets, romantic gifts. Pattern suggests holiday with partner.
+        Interests: fashion, premium brands, travel accessories."
+     
+     b) SIMPLE (segmentation_segmLevel_payload):
+        {"home_location": "NYC", "current_location": "Paris", "category_preference": "fashion",
+         "price_tier": "premium", "shopping_pattern": "gift_buyer", "avg_basket": 150}
+
+→ Return: {"user_id1": segmentation_data, "user_id2": segmentation_data, ...}
+
+📌 "write segmentation results" + passes results
+→ Use write_segmentation_results_to_firestore(results)
+→ Return: confirmation
+
+=== KEY RULES ===
+✅ Always convert data to native Python types (int, str, float) - NO numpy types
+✅ Keep responses concise and structured
+✅ If data is empty, clearly state "no data found"
+✅ Use LIMIT in queries - data is already optimized for token limits
+✅ Segmentation must be actionable for ad targeting
 """ 
 
 DATA_ANALYTIC_AGENT_DESCRIPTION = """
