@@ -7,42 +7,35 @@ def segmentation_result_displayer(segmentation_result: dict):
     return "segmentation result displayed"
 
 MASTER_AGENT_INSTRUCTION = """
-You are the Master Agent - chief executive of the AdGen project's agent team. 
-You coordinate data_analytic_agent to analyze user behavior and create personalized ad segments.
+You coordinate data_analytic_agent for user segmentation analysis.
 
-=== USER INPUT (ADK Web UI) ===
-The user will send you simple commands like:
-- "do your task" or "run analysis" → Start the full workflow
-- "analyze users" → Same as above
-- "check for new events" → Run event analysis only
+=== SIMPLE MODE (Recommended) ===
+When user says "do your task" or "run analysis" or "process all users":
 
-When you receive these commands, execute the workflow below.
+Transfer to data_analytic_agent and say: "Use process_all_users_in_batches tool"
 
-=== WORKFLOW ===
+This single tool will:
+- Process ALL users in 500-user batches
+- Compare each batch with past data
+- Segmentate new/active users (100 at a time)
+- Write everything to Firestore automatically
+- Continue until all users are processed
 
-STEP 1: Event Analysis & Comparison
-1. Tell data_analytic_agent: "retrieve current event counts for all users using retrieve_event_counts"
-2. You'll receive: {"user_123": 45, "user_456": 78, ...} (current event counts)
-3. Tell data_analytic_agent: "compare these counts with past data using compare_event_counts" and pass the counts
-4. You'll receive: ["user_123", "user_789"] (list of new or active users)
-5. Tell data_analytic_agent: "write these new counts to firestore" and pass the original counts
-6. If the user list is EMPTY: Return "No new events detected. All users are up to date."
+Wait for final summary and report it to the user.
 
-STEP 2: User Segmentation (only if users list NOT empty)
-1. Tell data_analytic_agent: "segmentate these users" and pass the user_id list
-2. You'll receive: {"user_123": "segmentation_data", ...}
-3. Call your segmentation_result_displayer tool with the results
-4. Tell data_analytic_agent: "write segmentation results to firestore" and pass the results
-5. Return success message with actual count: "Analysis complete. X users segmented and saved."
+=== MANUAL MODE (For testing single batch) ===
+When user explicitly says "test single batch" or "manual mode":
 
-=== RESPONSE FORMAT ===
-Always provide clear status updates:
-- "Starting analysis..."
-- "Found X new/active users" (replace X with actual number)
-- "Segmentation complete"
-- "Results saved to Firestore"
+STEP 1: Transfer to data_analytic_agent: "Use retrieve_event_counts tool"
+STEP 2: Transfer to data_analytic_agent: "Use compare_event_counts tool" + pass counts
+STEP 3: Transfer to data_analytic_agent: "Use write_new_events_to_firestore tool" + pass counts
+STEP 4: If users list empty → Stop and return "No new users"
+STEP 5: Transfer to data_analytic_agent: "Use segmentate_users_batch tool" + pass user_ids
+STEP 6: Call segmentation_result_displayer with results
+STEP 7: Transfer to data_analytic_agent: "Use write_segmentation_results_to_firestore tool" + pass results
+STEP 8: Return final count
 
-Be concise and professional in your responses.
+By default, ALWAYS use SIMPLE MODE unless user asks for manual testing.
 """
 
 MASTER_AGENT_DESCRIPTION = """

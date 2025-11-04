@@ -4,6 +4,7 @@ import os
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from MasterAgent.firestore_helper import get_firestore_client
+from google.cloud import firestore
 
 # Ortam değişkenlerini .env formatına uyarlama
 # - ADK/genai Client Vertex AI için GOOGLE_CLOUD_PROJECT ve GOOGLE_CLOUD_LOCATION bekliyor
@@ -64,8 +65,7 @@ def retrieve_single_user_data(user_id: str):
 
     return {
         'events': events_records,
-        'orders': orders_records,
-        'summary': f"{len(events_records)} events, {len(orders_records)} orders"
+        'orders': orders_records
     }
 
 def retrieve_events(user_id: list = [], event_name: str = "", event_time: str = "", path_name: str = "", payload: dict = {}, event_location: str = ""): 
@@ -159,16 +159,24 @@ def retrieve_order_counts():
     # Native Python tipine dönüştür - JSON serialize ve token optimizasyonu için
     return {str(r.get('user_id')): int(r.get('count')) for r in records}
 
-def retrieve_event_counts(): 
+def retrieve_event_counts(offset: int = 0, limit: int = 500): 
     """
     BigQuery'den event count'ları alır.
-    Token limitini aşmamak için son 500 aktif kullanıcıyla sınırlandırılmış.
+    
+    Args:
+        offset: Başlangıç pozisyonu (pagination için)
+        limit: Alınacak kayıt sayısı (max 500)
+    
+    Returns:
+        dict: {user_id: count, ...}
     """
     df = bq_to_dataframe(f"""
     SELECT user_id, COUNT(*) as count FROM `adgen_bq.user_events`
+    WHERE user_id != 'anonymous'
     GROUP BY user_id
-    ORDER BY count DESC
-    LIMIT 500
+    ORDER BY user_id ASC
+    LIMIT {limit}
+    OFFSET {offset}
     """)
     records = df.to_dict(orient='records')
     # Native Python tipine dönüştür - JSON serialize ve token optimizasyonu için
@@ -177,6 +185,123 @@ def retrieve_event_counts():
 
 def retrieve_users(): 
     return "users"
+
+def analyze_user_segmentation(user_id: str):
+    """
+    Kullanıcının RFM ve davranış analizi yaparak segment oluşturur.
+    
+    Segmentler:
+    - Recency (R): Son aktivite (event_time)
+    - Frequency (F): Belirli zaman dilimindeki toplam etkinlik
+    - Purchase Events: checkout_success sayısı
+    - Cart Abandonment: cart_clear/checkout_click var ama checkout_success yok
+    - Payload Details: Ürün adları, miktarlar (quantity), tutarlar (totalCents)
+    - Geographic: event_location bazlı coğrafi segment
+    """
+    from collections import Counter
+    from datetime import datetime
+    
+    user_data = retrieve_single_user_data(user_id)
+    events = user_data.get('events', [])
+    orders = user_data.get('orders', [])
+    
+    # === RECENCY (R) ===
+    recency_segment = "Low"
+    if events:
+        try:
+            # En son event zamanı
+            latest_event_time = events[0].get('event_time', '')
+            if latest_event_time:
+                latest_time = datetime.fromisoformat(latest_event_time.replace('Z', '+00:00'))
+                days_since = (datetime.now(latest_time.tzinfo) - latest_time).days
+                if days_since <= 7:
+                    recency_segment = "High"
+                elif days_since <= 30:
+                    recency_segment = "Medium"
+        except:
+            pass
+    
+    # === FREQUENCY (F) ===
+    frequency_segment = "Low"
+    total_events = len(events)
+    if total_events >= 50:
+        frequency_segment = "High"
+    elif total_events >= 20:
+        frequency_segment = "Medium"
+    
+    # === PURCHASE EVENTS ===
+    checkout_success_count = len([e for e in events if e.get('event_name') == 'checkout_success'])
+    purchase_segment = "No Purchase"
+    if checkout_success_count > 0:
+        purchase_segment = "Real Buyer"
+    
+    # === CART ABANDONMENT ===
+    cart_clear_events = [e for e in events if e.get('event_name') == 'cart_clear']
+    checkout_click_events = [e for e in events if e.get('event_name') == 'checkout_click']
+    cart_abandonment = False
+    if (len(cart_clear_events) > 0 or len(checkout_click_events) > 0) and checkout_success_count == 0:
+        cart_abandonment = True
+    
+    # === PAYLOAD DETAILS ===
+    # Hediye tespiti, ürün kategorileri, fiyat aralıkları
+    product_categories = []
+    total_spent = 0
+    is_gift_buyer = False
+    
+    for event in events:
+        payload = event.get('payload', {})
+        if isinstance(payload, str):
+            import json
+            try:
+                payload = json.loads(payload)
+            except:
+                payload = {}
+        
+        if isinstance(payload, dict):
+            # Ürün adları
+            for key, value in payload.items():
+                val_str = str(value).lower()
+                if 'gift' in val_str or 'hediye' in val_str:
+                    is_gift_buyer = True
+                # Kategori tespiti (basit)
+                if 'fashion' in val_str or 'clothing' in val_str:
+                    product_categories.append('Fashion')
+                elif 'electronic' in val_str or 'tech' in val_str:
+                    product_categories.append('Electronics')
+            
+            # Tutar bilgisi
+            total_cents = payload.get('totalCents', 0)
+            if total_cents:
+                total_spent += int(total_cents) / 100
+    
+    price_segment = "Low Spender"
+    if total_spent > 500:
+        price_segment = "High Spender"
+    elif total_spent > 100:
+        price_segment = "Medium Spender"
+    
+    # === GEOGRAPHIC ===
+    locations = [e.get('event_location') for e in events if e.get('event_location')]
+    geographic_segment = "Unknown"
+    if locations:
+        location_counts = Counter(locations)
+        most_common_location = location_counts.most_common(1)[0][0]
+        geographic_segment = most_common_location
+    
+    return {
+        'user_id': str(user_id),
+        'recency_segment': recency_segment,
+        'frequency_segment': frequency_segment,
+        'purchase_segment': purchase_segment,
+        'cart_abandonment': cart_abandonment,
+        'is_gift_buyer': is_gift_buyer,
+        'price_segment': price_segment,
+        'geographic_segment': geographic_segment,
+        'product_categories': list(set(product_categories)),
+        'total_events': total_events,
+        'total_orders': len(orders),
+        'total_spent_usd': round(total_spent, 2)
+    }
 
 def get_an_hour_ago_event_counts():
     """
@@ -213,15 +338,62 @@ def write_new_events_to_firestore(user2event_count: dict):
 
     return f"{written_count} user event counts written to firestore"
 
+def segmentate_users_batch(user_ids: list):
+    """
+    Kullanıcı listesini batch olarak segmente eder (max 100).
+    Her kullanıcı için analyze_user_segmentation çağrılır.
+    
+    Args:
+        user_ids: list of user_id strings
+        
+    Returns:
+        dict: {user_id: segmentation_data, ...}
+    """
+    # Batch size kontrolü
+    if len(user_ids) > 100:
+        user_ids = user_ids[:100]
+        print(f"Warning: User list truncated to 100 users")
+    
+    results = {}
+    for idx, user_id in enumerate(user_ids):
+        try:
+            print(f"Analyzing user {idx+1}/{len(user_ids)}: {user_id}")
+            segmentation = analyze_user_segmentation(user_id)
+            results[user_id] = segmentation
+        except Exception as e:
+            print(f"Error analyzing user {user_id}: {e}")
+            results[user_id] = {
+                'user_id': str(user_id),
+                'error': str(e),
+                'recency_segment': 'Low',
+                'frequency_segment': 'Low',
+                'purchase_segment': 'No Purchase',
+                'cart_abandonment': False,
+                'is_gift_buyer': False,
+                'price_segment': 'Low Spender',
+                'geographic_segment': 'Unknown',
+                'product_categories': [],
+                'total_events': 0,
+                'total_orders': 0,
+                'total_spent_usd': 0.0
+            }
+    
+    return results
+
 def write_segmentation_results_to_firestore(segmentation_results: dict):
+    """
+    Segmentation sonuçlarını Firestore'a batch olarak yazar.
+    Tüm dict tek seferde 'segmentation_results' dokümanına kaydedilir.
+    """
     db = get_firestore_client()
-    collection_ref = db.collection('segmentation_results')
-    for user_id, segmentation_result in segmentation_results.items():
-        collection_ref.document(str(user_id)).set({
-            'user_id': user_id,
-            'segmentation_result': segmentation_result
-        })
-    return f"{len(segmentation_results)} segmentation results written to firestore"
+    # Tüm segmentation results'ı tek bir dokümana yaz
+    doc_ref = db.collection('segmentation_results').document('latest_batch')
+    doc_ref.set({
+        'results': segmentation_results,
+        'count': len(segmentation_results),
+        'timestamp': firestore.SERVER_TIMESTAMP
+    })
+    return f"{len(segmentation_results)} segmentation results written to firestore in single batch"
 
 def compare_event_counts(current_user2event_count: dict):
     """
@@ -239,6 +411,91 @@ def compare_event_counts(current_user2event_count: dict):
             new_or_increased_users.append(user_id_str)
     
     return new_or_increased_users
+
+def process_all_users_in_batches():
+    """
+    TÜM kullanıcıları batch batch işler.
+    
+    Workflow:
+    1. 500'er kullanıcı grupları halinde event count al
+    2. Her batch için compare yap
+    3. Yeni/aktif kullanıcılar varsa segmentate et
+    4. Sonuçları Firestore'a yaz
+    5. Sonraki 500'lük batch'e geç
+    6. Kullanıcı kalmayana kadar devam et
+    
+    Returns:
+        dict: {
+            'total_processed': int,
+            'total_segmented': int,
+            'batches_processed': int
+        }
+    """
+    offset = 0
+    batch_size = 500
+    total_processed = 0
+    total_segmented = 0
+    batches_processed = 0
+    
+    print("🚀 Starting batch processing for ALL users...")
+    
+    while True:
+        print(f"\n📦 Processing batch {batches_processed + 1} (offset: {offset})")
+        
+        # 1. 500 kullanıcı al
+        current_batch_counts = retrieve_event_counts(offset=offset, limit=batch_size)
+        
+        if not current_batch_counts or len(current_batch_counts) == 0:
+            print("✅ No more users to process. All done!")
+            break
+        
+        print(f"   Retrieved {len(current_batch_counts)} users")
+        total_processed += len(current_batch_counts)
+        
+        # 2. Compare et
+        users_to_segment = compare_event_counts(current_batch_counts)
+        print(f"   Found {len(users_to_segment)} new/active users")
+        
+        # 3. Firestore'a yaz (her batch için)
+        write_new_events_to_firestore(current_batch_counts)
+        print(f"   ✓ Wrote event counts to Firestore")
+        
+        # 4. Eğer yeni kullanıcı varsa segmentate et
+        if users_to_segment and len(users_to_segment) > 0:
+            # 100'er 100'er segmentate et
+            for i in range(0, len(users_to_segment), 100):
+                segment_batch = users_to_segment[i:i+100]
+                print(f"   🔍 Segmenting users {i+1}-{min(i+100, len(users_to_segment))} of {len(users_to_segment)}")
+                
+                segmentation_results = segmentate_users_batch(segment_batch)
+                write_segmentation_results_to_firestore(segmentation_results)
+                
+                total_segmented += len(segmentation_results)
+            
+            print(f"   ✓ Segmented and saved {len(users_to_segment)} users")
+        else:
+            print(f"   ⏭️  No new users in this batch, skipping segmentation")
+        
+        batches_processed += 1
+        offset += batch_size
+        
+        # Eğer son batch tam 500 değilse, bu son batch demektir
+        if len(current_batch_counts) < batch_size:
+            print(f"\n✅ Reached last batch (only {len(current_batch_counts)} users)")
+            break
+    
+    result = {
+        'total_processed': total_processed,
+        'total_segmented': total_segmented,
+        'batches_processed': batches_processed
+    }
+    
+    print(f"\n🎉 COMPLETE!")
+    print(f"   Total users processed: {total_processed}")
+    print(f"   Total users segmented: {total_segmented}")
+    print(f"   Total batches: {batches_processed}")
+    
+    return result
 
 
 DATA_ANALYTIC_AGENT_INSTRUCTION = """
@@ -282,30 +539,40 @@ When Master Agent asks you to:
 → Return: confirmation message
 
 📌 "segmentate these users" + passes user_id list
-→ For EACH user_id:
-  1. Call retrieve_single_user_data(user_id)
-  2. Analyze their behavior:
-     - Events: page_view, cart_add, cart_remove, checkout, purchase
-     - Orders: what they bought, spending patterns
-     - Location: home vs current location
-     - Product preferences: categories, price range, seasonality
-  
-  3. Create TWO-LEVEL segmentation:
-     
-     a) DETAILED (segmentation_userLevel_payload):
-        "User from NYC, 25-35 age group, high spender ($500+/month). Currently in Paris. 
-        Recent purchases: winter jackets, romantic gifts. Pattern suggests holiday with partner.
-        Interests: fashion, premium brands, travel accessories."
-     
-     b) SIMPLE (segmentation_segmLevel_payload):
-        {"home_location": "NYC", "current_location": "Paris", "category_preference": "fashion",
-         "price_tier": "premium", "shopping_pattern": "gift_buyer", "avg_basket": 150}
-
-→ Return: {"user_id1": segmentation_data, "user_id2": segmentation_data, ...}
+→ Use segmentate_users_batch(user_ids)
+→ This will analyze each user with RFM + behavior analysis:
+  {
+    "user_123": {
+      "user_id": "user_123",
+      "recency_segment": "High|Medium|Low",
+      "frequency_segment": "High|Medium|Low",
+      "purchase_segment": "Real Buyer|No Purchase",
+      "cart_abandonment": true/false,
+      "is_gift_buyer": true/false,
+      "price_segment": "High Spender|Medium Spender|Low Spender",
+      "geographic_segment": "New York|Paris|Unknown",
+      "product_categories": ["Fashion", "Electronics"],
+      "total_events": 45,
+      "total_orders": 3,
+      "total_spent_usd": 234.56
+    }
+  }
+→ Maximum 100 users per batch
+→ Return: segmentation dictionary
 
 📌 "write segmentation results" + passes results
 → Use write_segmentation_results_to_firestore(results)
 → Return: confirmation
+
+📌 "process all users in batches" or "run full batch processing"
+→ Use process_all_users_in_batches()
+→ This will automatically:
+  1. Retrieve all users in 500-user batches
+  2. Compare each batch with past data
+  3. Segmentate new/active users (100 at a time)
+  4. Write results to Firestore
+  5. Continue until ALL users are processed
+→ Return: summary with total_processed, total_segmented, batches_processed
 
 === KEY RULES ===
 ✅ Always convert data to native Python types (int, str, float) - NO numpy types
@@ -331,9 +598,13 @@ data_analytic_agent = Agent(
         retrieve_users, 
         retrieve_event_counts,
         retrieve_single_user_data,
+        analyze_user_segmentation,
+        segmentate_users_batch,
         get_an_hour_ago_event_counts,
         write_new_events_to_firestore,
-        compare_event_counts
+        write_segmentation_results_to_firestore,
+        compare_event_counts,
+        process_all_users_in_batches
     ],
 )
 
