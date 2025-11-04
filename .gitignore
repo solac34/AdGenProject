@@ -1,0 +1,15 @@
+# service account credentials
+Agents/eighth-upgrade-475017-u5-5f7f40ad1003.json
+Agents/bigquery-serviceacc.json
+
+adg-ecommerce/eighth-upgrade-475017-u5-95fdc326baca.json
+
+# env files
+.env
+.env.local
+
+# logs
+logs/
+
+# node modules
+node_modules/

@@ -1,0 +1,35 @@
+{
+  "name": "adg-ecommerce",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev -p 3000",
+    "build": "next build",
+    "start": "next start -p 3000",
+    "lint": "next lint",
+    "seed:products": "node scripts/seedProducts.js",
+    "seed:realistic": "node scripts/seedRealistic.js",
+    "seed:stepwise": "node scripts/seedStepwise.js",
+    "seed:ultra": "node scripts/seedUltraRealistic.js",
+    "seed:v2": "node scripts/seedUltraRealisticV2.js",
+    "seed:mega": "node scripts/seedMega.js"
+  },
+  "dependencies": {
+    "@google-cloud/bigquery": "^7.7.0",
+    "@google-cloud/firestore": "^7.11.6",
+    "@faker-js/faker": "^8.4.1",
+    "bcryptjs": "^2.4.3",
+    "next": "14.2.5",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/node": "20.12.12",
+    "@types/react": "18.2.79",
+    "@types/react-dom": "18.2.25",
+    "eslint": "8.57.0",
+    "eslint-config-next": "14.2.5",
+    "typescript": "5.6.3"
+  }
+}

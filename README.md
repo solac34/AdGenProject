@@ -1,2 +1,2 @@
-# AdGenProject
+# AdGen
 
