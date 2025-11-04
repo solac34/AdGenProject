@@ -26,11 +26,11 @@ const SA_JSON = process.env.GCP_SERVICE_ACCOUNT_JSON;
 
 // ============= CONFIGURATION =============
 const CONFIG = {
-  totalUsers: 1026,
+  totalUsers: 126,
   minSessionsPerUser: 1,
   maxSessionsPerUser: 10,
-  orderChance: 0.20,
-  anonSessionCount: 3000,
+  orderChance: 0.25,
+  anonSessionCount: 200,
   locationDistribution: {
     us: 0.50,
     eu: 0.40,
@@ -120,6 +120,7 @@ const EU_CITIES = [
 
 const OTHER_CITIES = [
   { city: 'Istanbul', country: 'Türkiye' },
+  {city: 'Eskisehir', country: 'Türkiye'},
   { city: 'Tokyo', country: 'Japan' },
   { city: 'Sydney', country: 'Australia' },
   { city: 'Toronto', country: 'Canada' },
