@@ -26,43 +26,63 @@ if os.getenv('GOOGLE_GENAI_USE_VERTEXAI', '').lower() in ['true', '1']:
 
 
 
-def retrieve_order_counts(): 
-
-    sql_query = f"""
-    SELECT user_id, COUNT(*) as count FROM `adgen_bq.user_orders`
-    GROUP BY user_id
-    ORDER BY count DESC
+def retrieve_user_activity_counts():
     """
+    Hem event hem order count'larını BigQuery'den çeker ve birleştirir.
+    Her user için event_count, order_count ve created_at içeren yapı oluşturur.
     
-    print(f"🔍 retrieve_order_counts çağrıldı")
+    Returns:
+        dict: {
+            "status": "success",
+            "data_reference": {
+                "project": "...",
+                "dataset": "...",
+                "table": "combined_user_activity_..."
+            }
+        }
+    """
+    print(f"🔍 retrieve_user_activity_counts çağrıldı")
     
-    # Query'yi çalıştır - BigQuery otomatik temp table oluşturacak
-    result = query_to_temp_table(sql_query)
-    result["message"] = "User order counts successfully written to BigQuery for processing."
-    
-    print(f"✅ retrieve_order_counts RESULT:")
-    print(f"   Data Reference: {result.get('data_reference')}")
-    
-    return result
-
-
-def retrieve_event_counts(): 
-
-    sql_query = f"""
-    SELECT user_id, COUNT(*) as count FROM `adgen_bq.user_events`
+    # 1. Event counts query
+    events_query = """
+    SELECT user_id, COUNT(*) as event_count 
+    FROM `adgen_bq.user_events`
     WHERE user_id != 'anonymous'
     GROUP BY user_id
+    """
+    
+    # 2. Order counts query
+    orders_query = """
+    SELECT user_id, COUNT(*) as order_count 
+    FROM `adgen_bq.user_orders`
+    GROUP BY user_id
+    """
+    
+    # 3. Combined query - FULL OUTER JOIN ile her iki tarafı da al
+    combined_query = f"""
+    WITH events AS (
+        {events_query}
+    ),
+    orders AS (
+        {orders_query}
+    )
+    SELECT 
+        COALESCE(events.user_id, orders.user_id) as user_id,
+        COALESCE(events.event_count, 0) as event_count,
+        COALESCE(orders.order_count, 0) as order_count,
+        CURRENT_TIMESTAMP() as created_at
+    FROM events
+    FULL OUTER JOIN orders ON events.user_id = orders.user_id
     ORDER BY user_id ASC
     """
     
-    print(f"🔍 retrieve_event_counts çağrıldı")
-    print(f"📝 SQL Query: {sql_query[:100]}...")
+    print(f"📝 Combined query çalıştırılıyor...")
     
     # Query'yi çalıştır - BigQuery otomatik temp table oluşturacak
-    result = query_to_temp_table(sql_query)
-    result["message"] = "User event counts successfully written to BigQuery for processing."
+    result = query_to_temp_table(combined_query)
+    result["message"] = "User activity counts (events + orders) successfully written to BigQuery."
     
-    print(f"✅ retrieve_event_counts RESULT:")
+    print(f"✅ retrieve_user_activity_counts RESULT:")
     print(f"   Status: {result.get('status')}")
     print(f"   Data Reference: {result.get('data_reference')}")
     
@@ -70,9 +90,10 @@ def retrieve_event_counts():
 
 
 
-def write_new_events_to_firestore(data_reference: dict):
+def write_user_activity_to_firestore(data_reference: dict):
     """
-    BigQuery temp tablosundan event count'ları okur ve Firestore'a tek bir döküman olarak yazar.
+    BigQuery temp tablosundan user activity verilerini (event_count, order_count, created_at) 
+    okur ve Firestore'a tek bir döküman olarak yazar.
     
     Args:
         data_reference: BigQuery tablo referansı
@@ -85,9 +106,8 @@ def write_new_events_to_firestore(data_reference: dict):
     Returns:
         str: Confirmation message
     """
-    print(f"🔍 write_new_events_to_firestore çağrıldı")
+    print(f"🔍 write_user_activity_to_firestore çağrıldı")
     print(f"📥 Gelen data_reference: {data_reference}")
-    print(f"📥 data_reference type: {type(data_reference)}")
     
     # BigQuery tablo bilgilerini al
     project = data_reference.get('project')
@@ -100,38 +120,46 @@ def write_new_events_to_firestore(data_reference: dict):
     
     if not all([project, dataset, table]):
         print("❌ Geçersiz tablo referansı!")
-        print(f"   Missing: project={bool(project)}, dataset={bool(dataset)}, table={bool(table)}")
         return "Error: Invalid table reference"
     
     # BigQuery'den veriyi çek
     full_table_name = f"`{project}.{dataset}.{table}`"
-    query = f"SELECT user_id, count FROM {full_table_name}"
+    query = f"SELECT user_id, event_count, order_count, created_at FROM {full_table_name}"
     
     print(f"📊 BigQuery'den veri çekiliyor: {full_table_name}")
     df = bq_to_dataframe(query)
     
-    # DataFrame'i dictionary'ye çevir
-    event_counts = {str(row['user_id']): int(row['count']) for _, row in df.iterrows()}
+    # DataFrame'i nested dictionary'ye çevir
+    # Format: {user_id: {event_count: X, order_count: Y, created_at: Z}}
+    user_activity = {}
+    for _, row in df.iterrows():
+        user_id = str(row['user_id'])
+        user_activity[user_id] = {
+            'event_count': int(row['event_count']),
+            'order_count': int(row['order_count']),
+            'created_at': row['created_at'].isoformat() if hasattr(row['created_at'], 'isoformat') else str(row['created_at'])
+        }
     
-    print(f"✅ {len(event_counts)} kullanıcı verisi alındı")
+    print(f"✅ {len(user_activity)} kullanıcı verisi alındı")
     
     # Firestore'a tek döküman olarak yaz
     db = get_firestore_client()
     
     # Benzersiz döküman ID oluştur (timestamp bazlı)
     doc_id = f"snapshot_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-    doc_ref = db.collection('user_event_counts').document(doc_id)
+    doc_ref = db.collection('user_activity_counts').document(doc_id)
     
     doc_ref.set({
-        'event_counts': event_counts,
-        'total_users': len(event_counts),
+        'user_activity': user_activity,
+        'total_users': len(user_activity),
         'createdAt': firestore.SERVER_TIMESTAMP,
         'table_source': f"{project}.{dataset}.{table}"
     })
     
-    print(f"✅ Firestore'a yazıldı: user_event_counts/{doc_id}")
+    print(f"✅ Firestore'a yazıldı: user_activity_counts/{doc_id}")
+    print(f"   Örnek veri: {list(user_activity.items())[:2]}")
 
-    return f"{len(event_counts)} user event counts written to firestore as document: {doc_id}"
+    return f"{len(user_activity)} user activity records written to firestore as document: {doc_id}"
 
 
 
@@ -159,56 +187,67 @@ The Master Agent coordinates you, but YOU execute the actual data operations.
 
 === YOUR TOOLS & THEIR EXACT USAGE ===
 
-📊 Tool 1: retrieve_event_counts()
-→ Purpose: Query BigQuery for user event counts and create a temporary table
+📊 Tool 1: retrieve_user_activity_counts()
+→ Purpose: Retrieve BOTH event counts AND order counts for all users in a single combined query
 → Parameters: NONE
 → Returns: A dictionary with this EXACT structure:
   {
     "status": "success",
-    "message": "User event counts successfully written to BigQuery for processing.",
+    "message": "User activity counts (events + orders) successfully written to BigQuery.",
     "data_reference": {
       "project": "eighth-upgrade-475017-u5",
-      "dataset": "temp_datasets",
-      "table": "user_events_<uuid>"
+      "dataset": "_abc123_...",
+      "table": "anonc4ca20ccc0ea49af9846718f5a1779f8e..."
     }
   }
 → What it does internally:
-  • Queries `adgen_bq.user_events` table
-  • Groups by user_id, counts events
-  • Writes results to a temp BigQuery table
+  • Queries BOTH `adgen_bq.user_events` AND `adgen_bq.user_orders` tables
+  • Uses FULL OUTER JOIN to combine both datasets
+  • For each user_id, calculates:
+    - event_count: Total number of events
+    - order_count: Total number of orders
+    - created_at: Current timestamp
+  • BigQuery automatically creates a temporary table with results
   • Returns the temp table reference
+→ Result table structure:
+  | user_id | event_count | order_count | created_at |
+  |---------|-------------|-------------|------------|
+  | user_1  | 45          | 3           | 2025-11-05 |
+  | user_2  | 120         | 8           | 2025-11-05 |
 
-📊 Tool 2: retrieve_order_counts()
-→ Purpose: Query BigQuery for user order counts and create a temporary table
-→ Parameters: NONE
-→ Returns: Same structure as retrieve_event_counts() but for orders
-→ What it does internally:
-  • Queries `adgen_bq.user_orders` table
-  • Groups by user_id, counts orders
-  • Writes results to a temp BigQuery table
-  • Returns the temp table reference
-
-💾 Tool 3: write_new_events_to_firestore(data_reference: dict)
-→ Purpose: Read from BigQuery temp table and write a snapshot to Firestore
+💾 Tool 2: write_user_activity_to_firestore(data_reference: dict)
+→ Purpose: Read combined user activity data from BigQuery temp table and write to Firestore
 → Parameters: 
   • data_reference (dict): The BigQuery table reference with keys:
     - "project": GCP project ID
-    - "dataset": BigQuery dataset name
-    - "table": Temp table name
-→ Returns: Confirmation message string (e.g., "1234 user event counts written to firestore as document: snapshot_20251105_120000")
+    - "dataset": BigQuery dataset name (auto-generated by BigQuery)
+    - "table": Temp table name (auto-generated by BigQuery, like "anonc4ca20...")
+→ Returns: Confirmation message (e.g., "1234 user activity records written to firestore as document: snapshot_20251105_023840")
 → What it does internally:
-  • Queries the BigQuery temp table using the provided reference
-  • Reads all user_id and count pairs
-  • Creates a SINGLE Firestore document in 'user_event_counts' collection
+  • Queries the BigQuery temp table: SELECT user_id, event_count, order_count, created_at
+  • Converts to nested dictionary format:
+    {
+      "user_123": {
+        "event_count": 45,
+        "order_count": 3,
+        "created_at": "2025-11-05T02:38:40"
+      },
+      "user_456": {
+        "event_count": 120,
+        "order_count": 8,
+        "created_at": "2025-11-05T02:38:40"
+      }
+    }
+  • Creates a SINGLE Firestore document in 'user_activity_counts' collection
   • Document structure:
     {
-      'event_counts': {user_id: count, ...},
+      'user_activity': {nested dict above},
       'total_users': 1234,
-      'createdAt': <timestamp>,
+      'createdAt': <firestore timestamp>,
       'table_source': 'project.dataset.table'
     }
 
-💾 Tool 4: write_segmentation_results_to_firestore(segmentation_results: dict)
+💾 Tool 3: write_segmentation_results_to_firestore(segmentation_results: dict)
 → Purpose: Write user segmentation analysis results to Firestore
 → Parameters:
   • segmentation_results (dict): User segmentation data
@@ -217,49 +256,48 @@ The Master Agent coordinates you, but YOU execute the actual data operations.
   • Writes results to 'segmentation_results' collection
   • Document ID: 'latest_batch'
 
-=== IMPORTANT WORKFLOW NOTES ===
+=== WORKFLOW EXAMPLE ===
 
-When Master Agent asks you to:
+When Master Agent says: "Write user activity counts to firestore"
 
-A. "Run retrieve_event_counts":
-   → Execute retrieve_event_counts() with NO parameters
-   → Return the ENTIRE result dictionary to Master Agent
-   
-B. "Run write_new_events_to_firestore with <data>":
-   → The Master Agent will pass you ONLY the data_reference object
-   → NOT the full result dictionary
-   → The data_reference contains: {project, dataset, table}
-   → Execute write_new_events_to_firestore(data_reference)
-   → Return the confirmation message
-
-=== DATA FLOW EXAMPLE ===
-
-Step 1: Master calls retrieve_event_counts()
+STEP 1: Master calls retrieve_user_activity_counts()
   You return:
   {
     "status": "success",
     "data_reference": {
       "project": "eighth-upgrade-475017-u5",
-      "dataset": "temp_datasets",
-      "table": "user_events_abc123"
+      "dataset": "_52d6b668_19a5_13ca_3c8",
+      "table": "anonc4ca20ccc0ea49af9846718f5a1779f8e38f03b418fa376084b877282982585d"
     }
   }
 
-Step 2: Master extracts data_reference and calls write_new_events_to_firestore()
+STEP 2: Master extracts data_reference and calls write_user_activity_to_firestore()
   Master passes you ONLY:
   {
     "project": "eighth-upgrade-475017-u5",
-    "dataset": "temp_datasets",
-    "table": "user_events_abc123"
+    "dataset": "_52d6b668_19a5_13ca_3c8",
+    "table": "anonc4ca20ccc0ea49af9846718f5a1779f8e38f03b418fa376084b877282982585d"
   }
   
-  You query BigQuery, write to Firestore, return confirmation.
+  You:
+  1. Query the temp table
+  2. Transform to nested dict format
+  3. Write to Firestore collection: user_activity_counts
+  4. Return confirmation: "1234 user activity records written..."
+
+=== KEY ADVANTAGES ===
+✅ Single query retrieves BOTH events and orders (efficient!)
+✅ Combined data structure: {event_count + order_count + created_at}
+✅ Handles users with only events, only orders, or both (FULL OUTER JOIN)
+✅ Timestamp included for tracking when data was retrieved
+✅ Automatic temporary table creation by BigQuery
 
 === KEY RULES ===
 ✅ Always return complete, well-structured responses
 ✅ Include clear confirmation messages with counts and document IDs
 ✅ Log progress with print statements (they help debugging)
 ✅ Handle errors gracefully and return descriptive error messages
+✅ The data_reference you receive will have BigQuery's auto-generated table names
 """ 
 
 DATA_ANALYTIC_AGENT_DESCRIPTION = """
@@ -272,9 +310,8 @@ data_analytic_agent = Agent(
     description="Retrieves events from the bigquery table 'user_events' and tidies them up based on the request",
     instruction=DATA_ANALYTIC_AGENT_INSTRUCTION,
     tools=[
-        retrieve_order_counts, 
-        retrieve_event_counts,
-        write_new_events_to_firestore,
+        retrieve_user_activity_counts,
+        write_user_activity_to_firestore,
         write_segmentation_results_to_firestore,
     ],
 )
