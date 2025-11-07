@@ -1,0 +1,42 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --brand-blue: #007acc;
+  --brand-gray1: #3e3e42;
+  --brand-gray2: #2d2d30;
+  --brand-gray3: #252526;
+  --brand-gray4: #1e1e1e;
+}
+
+html, body {
+  height: 100%;
+}
+
+/* Smooth subtle scroll feel */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--brand-blue) var(--brand-gray3);
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: var(--brand-gray3);
+}
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, rgba(0,122,204,0.9), rgba(0,122,204,0.5));
+  border-radius: 9999px;
+}
+
+.card-surface {
+  @apply rounded-2xl bg-gradient-to-b from-brand-gray3/80 to-brand-gray4 p-1 shadow-glow;
+}
+.card-inner {
+  @apply rounded-2xl bg-brand-gray4 p-5;
+}
+
+

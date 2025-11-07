@@ -4,7 +4,7 @@ import os
 import json
 import base64
 
-def bq_to_dataframe(query: str, project_id: str = None, credentials=None):
+def bq_to_dataframe(query: str, project_id: str = None, credentials=None, location: str = None):
     import pandas as pd
 
     # .env'den project_id'yi al
@@ -40,7 +40,8 @@ def bq_to_dataframe(query: str, project_id: str = None, credentials=None):
         )
 
     client = bigquery.Client(**client_args)
-    query_job = client.query(query)
+    # Location zorunluysa (özellikle temp dataset farklı region'da oluşturulduysa)
+    query_job = client.query(query, location=location)
     results = query_job.result()
     df = results.to_dataframe()
     return df
@@ -102,6 +103,7 @@ def query_to_temp_table(query: str, temp_table_name: str = None, project_id: str
     print(f"   Project: {destination.project}")
     print(f"   Dataset: {destination.dataset_id}")
     print(f"   Table: {destination.table_id}")
+    print(f"   Location: {query_job.location}")
     
     return {
         "status": "success",
@@ -109,6 +111,7 @@ def query_to_temp_table(query: str, temp_table_name: str = None, project_id: str
         "data_reference": {
             "project": destination.project,
             "dataset": destination.dataset_id,
-            "table": destination.table_id
+            "table": destination.table_id,
+            "location": query_job.location
         }
     }
