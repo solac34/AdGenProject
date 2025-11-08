@@ -48,9 +48,12 @@ README.md
 # Logs
 *.log
 
-# Environment files (these should be set via Cloud Run environment variables)
-.env
-.env.*
+# Environment files
+# Note: .env is included to suppress ADK warnings, but should only contain non-sensitive config
+# .env.*
+*.env.local
+*.env.development
+*.env.production
 
 # Test files
 test_*.py

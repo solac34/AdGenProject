@@ -1,135 +1,227 @@
-# AdGen Agents - Cloud Run Ready
+# AdGen Agents - Cloud Run HTTP API
 
-This directory contains the AdGen Agents prepared for Google Cloud Run deployment.
+🚀 **HTTP API for MasterAgent with session rollover using Google ADK InMemoryRunner**
 
-## 🚀 Quick Start
+## Overview
 
-1. **Set your project ID:**
-   ```bash
-   export GOOGLE_CLOUD_PROJECT="your-project-id"
-   ```
+This service deploys the MasterAgent (with DataAnalyticAgent and CreativeAgent sub-agents) as a Cloud Run HTTP API. It accepts POST requests with prompts and returns agent responses after processing.
 
-2. **Verify setup:**
-   ```bash
-   python3 verify-setup.py
-   ```
-
-3. **Deploy (choose one):**
-   ```bash
-   # Option A: Using ADK CLI (recommended)
-   ./deploy-adk.sh
-   
-   # Option B: Using Docker
-   ./deploy.sh
-   ```
-
-## 📁 Files Created/Modified
-
-### Core Files
-- **`main.py`** - Cloud Run entry point
-- **`config.py`** - Configuration management
-- **`requirements.txt`** - Updated with all dependencies
-- **`Dockerfile`** - Container definition for Cloud Run
-
-### Deployment Files
-- **`deploy-adk.sh`** - ADK CLI deployment script (recommended)
-- **`deploy.sh`** - Docker-based deployment script
-- **`verify-setup.py`** - Setup verification script
-- **`.dockerignore`** - Docker ignore rules
-
-### Documentation
-- **`DEPLOYMENT.md`** - Comprehensive deployment guide
-- **`README.md`** - This file
-
-### Agent Files (Modified)
-- **`MasterAgent/agent.py`** - Fixed import paths
-- **`DataAnalyticAgent/agent.py`** - Fixed import paths
-
-## 🏗️ Architecture
+## Architecture
 
 ```
-AdGen Agents (Cloud Run Service)
-├── MasterAgent (Root Agent)
-│   ├── Coordinates all operations
-│   └── Contains sub-agents
-├── DataAnalyticAgent (Sub-agent)
-│   ├── BigQuery operations
-│   └── Firestore operations
-└── CreativeAgent (Sub-agent)
-    └── Content creation
+HTTP Request → Flask API (/run endpoint)
+    ↓
+InMemoryRunner (ADK)
+    ↓
+MasterAgent
+    ├── DataAnalyticAgent (BigQuery analysis)
+    └── CreativeAgent (Content generation)
+    ↓
+HTTP Response (JSON)
 ```
 
-## 🔧 Key Changes Made
+## Quick Start
 
-1. **Fixed Import Paths**: Updated relative imports to work in Cloud Run
-2. **Added Entry Point**: Created `main.py` for Cloud Run deployment
-3. **Updated Dependencies**: Added all required packages to `requirements.txt`
-4. **Created Dockerfile**: Optimized for Cloud Run deployment
-5. **Deployment Scripts**: Two options for deployment (ADK CLI and Docker)
-6. **Configuration**: Environment-based configuration management
-
-## 📋 Prerequisites
-
-Before deploying, ensure you have:
-
-- Google Cloud Project with billing enabled
-- `gcloud` CLI installed and authenticated
-- `google-adk` package installed (`pip install google-adk`)
-- Required environment variables set
-
-## 🎯 Deployment Options
-
-### Option 1: ADK CLI (Recommended)
-- Simpler deployment process
-- Automatic UI inclusion
-- Better integration with ADK ecosystem
-
-### Option 2: Docker
-- More control over deployment
-- Custom container configuration
-- Direct Cloud Run deployment
-
-## 🔍 Verification
-
-Run the verification script to check your setup:
+### 1. Deploy to Cloud Run
 
 ```bash
-python3 verify-setup.py
+cd Agents
+./deploy.sh
 ```
 
-This will check:
-- Required files exist
-- Commands are available
-- Environment variables are set
-- Python imports work
-- Authentication is configured
+**Note:** This uses Google Cloud Build - no local Docker required! ☁️
 
-## 📚 Next Steps
+### 2. Test the API
 
-1. Review `DEPLOYMENT.md` for detailed instructions
-2. Set up your environment variables
-3. Run the verification script
-4. Choose and execute a deployment script
-5. Test your deployed agents
+```bash
+# Health check
+curl https://adgen-agents-710876076445.us-central1.run.app/health
 
-## 🆘 Troubleshooting
+# Run agent
+curl -X POST https://adgen-agents-710876076445.us-central1.run.app/run \
+  -H 'Content-Type: application/json' \
+  -d '{"prompt": "Do your segmentation task.", "max_rounds": 8}'
+```
 
-Common issues and solutions:
+### 3. View Logs
 
-1. **Import Errors**: Check Python path configuration
-2. **Authentication**: Run `gcloud auth login`
-3. **Permissions**: Ensure service account has required roles
-4. **Dependencies**: Install missing packages with `pip install -r requirements.txt`
+```bash
+gcloud logs tail --service=adgen-agents --region=us-central1 --follow
+```
 
-For detailed troubleshooting, see `DEPLOYMENT.md`.
+## API Documentation
 
-## 🔐 Security Notes
+See [TESTING.md](./TESTING.md) for complete API documentation, Postman examples, and debugging tips.
 
-- Use Vertex AI authentication (recommended)
-- Store secrets in Google Secret Manager
-- Use least-privilege service accounts
-- Enable audit logging for production
+### Endpoints
+
+- `GET /` - API info and documentation
+- `GET /health` - Health check
+- `POST /run` - Run agent with prompt (main endpoint)
+- `POST /pubsub/push` - Pub/Sub trigger endpoint
+
+### Request Format
+
+```json
+{
+  "prompt": "Your task description here",
+  "max_rounds": 8
+}
+```
+
+### Response Format
+
+```json
+{
+  "result": {...},
+  "rounds": 3,
+  "statuses": ["continue", "continue", "finished"],
+  "success": true
+}
+```
+
+## Local Development
+
+### Run Locally
+
+```bash
+# Set environment variables
+export GOOGLE_CLOUD_PROJECT="eighth-upgrade-475017-u5"
+export GOOGLE_GENAI_USE_VERTEXAI="True"
+export PORT=8080
+
+# Run the HTTP server
+python main.py
+```
+
+### Test Locally
+
+```bash
+# In another terminal, test the API
+curl -X POST http://localhost:8080/run \
+  -H 'Content-Type: application/json' \
+  -d '{"prompt": "Test prompt", "max_rounds": 2}'
+```
+
+## Environment Variables
+
+These are automatically set during deployment:
+
+- `GOOGLE_CLOUD_PROJECT` - GCP project ID
+- `GOOGLE_CLOUD_LOCATION` - GCP region (us-central1)
+- `GOOGLE_GENAI_USE_VERTEXAI` - Use Vertex AI (True)
+- `BQ_DATASET` - BigQuery dataset name
+- `BQ_LOCATION` - BigQuery location
+- `FIRESTORE_DATABASE` - Firestore database name
+
+## Files
+
+### ✅ Core Files (Production)
+- **`main.py`** - Flask HTTP API server with InMemoryRunner and session rollover
+- **`Dockerfile`** - Container image definition for Cloud Run
+- **`deploy.sh`** - Deployment script using Cloud Build
+- **`requirements.txt`** - Python dependencies
+- **`.env`** - Environment variables (not in git, create locally)
+
+### 🤖 Agent Modules
+- **`MasterAgent/agent.py`** - Main orchestrator agent
+- **`DataAnalyticAgent/agent.py`** - BigQuery analytics agent
+- **`CreativeAgent/agent.py`** - Content generation agent
+
+### 📝 Configuration & Documentation
+- **`config.py`** - Configuration module (environment variables)
+- **`.dockerignore`** - Docker ignore rules
+- **`README.md`** - This file (main documentation)
+- **`TESTING.md`** - API testing guide and examples
+
+### 🔑 Credentials (Local Development Only)
+- **`eighth-upgrade-475017-u5-5f7f40ad1003.json`** - Vertex AI service account (not in git)
+- **`bigquery-serviceacc.json`** - BigQuery service account (not in git)
+
+## Key Features
+
+✅ **HTTP API** - RESTful endpoints for easy integration  
+✅ **Session Rollover** - Automatic session management for long tasks  
+✅ **Cloud Run** - Serverless, auto-scaling deployment  
+✅ **Vertex AI** - Uses Google's managed AI models  
+✅ **BigQuery Integration** - DataAnalyticAgent queries BigQuery  
+✅ **Firestore Integration** - Persistent storage  
+✅ **Pub/Sub Support** - Async job triggering  
+✅ **Health Checks** - Built-in monitoring endpoints  
+✅ **Comprehensive Logging** - Full request/response logging  
+
+## Architecture Details
+
+### Session Rollover
+
+The system supports long-running tasks by:
+1. Running agent in rounds (max 8 by default)
+2. Checking response status after each round
+3. If status is "continue", creating a fresh session and continuing
+4. If status is "finished" or max rounds reached, returning results
+
+This prevents context window exhaustion and allows multi-step workflows.
+
+### Authentication
+
+The service uses Cloud Run's default service account with ADC (Application Default Credentials):
+- No credential files in the container
+- Automatic authentication to GCP services
+- Secure by default
+
+### Resource Limits
+
+- Memory: 2GiB
+- CPU: 2 cores
+- Timeout: 3600s (1 hour)
+- Max instances: 10
+
+Adjust these in `deploy.sh` if needed.
+
+## Troubleshooting
+
+### Issue: Agent times out
+**Solution:** Increase `max_rounds` in request or timeout in `deploy.sh`
+
+### Issue: Out of memory
+**Solution:** Increase memory limit in `deploy.sh`: `--memory=4Gi`
+
+### Issue: Can't connect to BigQuery
+**Solution:** Verify Cloud Run service account has BigQuery permissions
+
+### Issue: Vertex AI errors
+**Solution:** Check `GOOGLE_GENAI_USE_VERTEXAI=True` and project ID is correct
+
+## Monitoring
+
+```bash
+# Real-time logs
+gcloud logs tail --service=adgen-agents --region=us-central1 --follow
+
+# Recent logs
+gcloud logs read --service=adgen-agents --region=us-central1 --limit=100
+
+# Service status
+gcloud run services describe adgen-agents --region=us-central1
+
+# Service metrics (in Cloud Console)
+https://console.cloud.google.com/run/detail/us-central1/adgen-agents/metrics
+```
+
+## Next Steps
+
+1. ✅ Deploy with `./deploy.sh`
+2. ✅ Test with curl or Postman (see TESTING.md)
+3. 📊 Monitor logs and metrics
+4. 🔐 Optional: Add authentication for production
+
+## Support
+
+- **Documentation**: TESTING.md
+- **Logs**: `gcloud logs tail --service=adgen-agents --region=us-central1`
+- **Service URL**: https://adgen-agents-710876076445.us-central1.run.app
 
 ---
 
-Your AdGen Agents are now ready for Cloud Run deployment! 🎉
+**Last Updated**: November 2024  
+**Version**: 2.0 (HTTP API with InMemoryRunner)
