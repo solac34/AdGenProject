@@ -3,10 +3,12 @@ from .bq_helper import bq_to_dataframe, query_to_temp_table
 import os
 import sys
 from datetime import datetime
-sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-from MasterAgent.firestore_helper import get_firestore_client, get_past_events_from_firestore
+import uuid
 from google.cloud import firestore
-import uuid 
+
+# Add the parent directory to the path to allow imports
+sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+from MasterAgent.firestore_helper import get_firestore_client, get_past_events_from_firestore 
 
 
 # Ortam değişkenlerini .env formatına uyarlama
@@ -19,9 +21,10 @@ if os.getenv('GOOGLE_GENAI_USE_VERTEXAI', '').lower() in ['true', '1']:
     # Lokasyon varsayılanı
     if not os.getenv('GOOGLE_CLOUD_LOCATION'):
         os.environ['GOOGLE_CLOUD_LOCATION'] = 'us-central1'
-    # Vertex AI için ayrı credential belirtildiyse onu ADC olarak aktar
-    if os.getenv('GOOGLE_APPLICATION_CREDENTIALS_AI'):
-        os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = os.getenv('GOOGLE_APPLICATION_CREDENTIALS_AI', '')
+    
+    # Cloud Run'da default service account kullan, file-based credentials kullanma
+    # GOOGLE_APPLICATION_CREDENTIALS sadece local development için gerekli
+    # Cloud Run'da bu otomatik olarak ayarlanır
 
 
 

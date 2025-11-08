@@ -1,4 +1,6 @@
 import os
+import json
+import base64
 from google.cloud import firestore
 from google.oauth2 import service_account
 
@@ -6,9 +8,6 @@ from google.oauth2 import service_account
 def get_firestore_client():
     project_id = os.getenv('GCP_PROJECT_ID', 'eighth-upgrade-475017-u5')
     database_id = os.getenv('FIRESTORE_DB_ID', 'adgen-db')
-    
-    # BQ credential'ı kullan (.env'deki GOOGLE_APPLICATION_CREDENTIALS_BQ)
-    bq_keyfile = os.getenv('GOOGLE_APPLICATION_CREDENTIALS_BQ')
     
     client_args = {
         'project': project_id,
@@ -21,13 +20,23 @@ def get_firestore_client():
         'https://www.googleapis.com/auth/cloud-platform',
     ]
     
-    if bq_keyfile and os.path.exists(bq_keyfile):
-        credentials = service_account.Credentials.from_service_account_file(
-            bq_keyfile,
-            scopes=scopes
-        )
-        client_args['credentials'] = credentials
+    # Try environment-based service account JSON first (Cloud Run compatible)
+    sa_json = os.getenv('GCP_SERVICE_ACCOUNT_JSON') or os.getenv('GCP_SERVICE_ACCOUNT_JSON_BQ')
+    if sa_json:
+        try:
+            info = json.loads(sa_json) if sa_json.strip().startswith('{') else json.loads(base64.b64decode(sa_json).decode('utf-8'))
+            credentials = service_account.Credentials.from_service_account_info(info, scopes=scopes)
+            client_args['credentials'] = credentials
+        except Exception:
+            pass
+    else:
+        # Fallback to file-based credentials (local development only)
+        bq_keyfile = os.getenv('GOOGLE_APPLICATION_CREDENTIALS_BQ')
+        if bq_keyfile and os.path.exists(bq_keyfile):
+            credentials = service_account.Credentials.from_service_account_file(bq_keyfile, scopes=scopes)
+            client_args['credentials'] = credentials
     
+    # If no explicit credentials found, use default Cloud Run service account (ADC)
     return firestore.Client(**client_args)
 
 

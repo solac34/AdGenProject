@@ -1,10 +1,9 @@
 # Dependencies for Agents modules
+google-adk>=0.1.0
 google-cloud-bigquery>=3.25.0
+google-cloud-firestore>=2.16.0
 google-auth>=2.35.0
 pandas>=2.2.2
 db-dtypes>=1.2.0
 pyarrow>=17.0.0
 python-dotenv>=1.0.1
-
-
-google-adk

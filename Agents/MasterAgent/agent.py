@@ -1,4 +1,9 @@
 from google.adk.agents.llm_agent import Agent
+import sys
+import os
+# Add the parent directory to the path to allow imports
+sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+
 from DataAnalyticAgent.agent import (
     data_analytic_agent,
     retrieve_user_activity_counts,
@@ -6,6 +11,7 @@ from DataAnalyticAgent.agent import (
     read_users_to_segmentate,
     write_user_segmentation_result,
     write_segmentation_results_to_firestore,
+    compare_event_counts,
 )
 from DataAnalyticAgent.bq_helper import bq_to_dataframe
 from .firestore_helper import get_past_events_from_firestore, get_firestore_client
