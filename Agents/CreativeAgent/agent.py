@@ -1,63 +1,58 @@
 from google.adk.agents.llm_agent import Agent
 from google import genai
+from google.cloud import storage
 import os
 from pathlib import Path
-from Agents.MasterAgent.firestore_helper import get_firestore_client
+from uuid import uuid4
+from datetime import datetime
+import io
+from MasterAgent.firestore_helper import get_firestore_client
 
-def read_users_to_create_content():
+
+def save_content_to_gcs(content: bytes, object_name: str, *, content_type: str = "application/octet-stream", bucket_name: str | None = None) -> str:
     """
-    Reads users to create content from firestore collection 'users_to_create_content'.
+    Save arbitrary content bytes to Google Cloud Storage.
+    - bucket is resolved from env var GCS_CONTENT_BUCKET or defaults to 'ecommerce-ads-contents'
+    - object_name supports folder paths, e.g. 'segmentation_location/image_0.jpg'
+    Returns gs:// URI of the uploaded object.
     """
-    print(f"🔍 read_users_to_create_content çağrıldı")
-    db = get_firestore_client()
-    collection_ref = db.collection('users_to_create_content')
-    pending_users_query = (
-        collection_ref.where('state', '==', 'pending')
-        .limit(20)
-        .stream()
-    )
-    users_list = [doc.to_dict()['user_id'] for doc in pending_users_query]
-
-    return [get_user_location_and_segmentation(user_id) for user_id in users_list]
-
-def get_user_location_and_segmentation(user_id: str):
-    """
-    Retrieves the user_location from the 'users' table and the segmentation_result from the 'user_segmentations' 
-    table (collections) in Firestore for a given user_id.
-
-    Args:
-        user_id (str): The user ID to look up.
-
-    Returns:
-        dict: {
-            "user_id": user_id,
-            "user_location": ...,
-            "segmentation_result": ...
-        } or None if not found.
-    """
-    db = get_firestore_client()
-    # Get user_location from 'users' collection
-    user_doc = db.collection('users').document(user_id).get()
-    user_location = None
-    if user_doc.exists:
-        user_data = user_doc.to_dict()
-        user_location = user_data.get('location')
     
-    # Get segmentation_result from 'user_segmentations' collection
-    segmentation_doc = db.collection('user_segmentations').document(user_id).get()
-    segmentation_result = None
-    if segmentation_doc.exists:
-        segmentation_data = segmentation_doc.to_dict()
-        segmentation_result = segmentation_data.get('segmentation_result')
-    
-    if user_location is not None or segmentation_result is not None:
-        return {
-            "user_id": user_id,
-            "user_location": user_location,
-            "segmentation_result": segmentation_result
-        }
-    else:
-        return None
+    bucket = bucket_name or os.getenv("GCS_CONTENT_BUCKET") or "ecommerce-ads-contents"
+    client = storage.Client()
+    bucket_obj = client.bucket(bucket)
+    # Ensure a subfolder path is used and uniqueness if plain name provided
+    if "/" not in object_name:
+        # place inside folder with the given name for neat organization
+        base = object_name.replace(".jpg", "")
+        object_name = f"{base}/{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}-{uuid4().hex}.jpg"
+    blob = bucket_obj.blob(object_name)
+    blob.upload_from_string(content, content_type=content_type)
+    # Optionally you can make public or set cache-control later
+    return f"gs://{bucket}/{object_name}"
+
+
+def read_pairs_to_create_content():
+    """
+    Reads segmentation_location_pairs from Firestore and returns an array of [segmentation_result, location] pairs.
+    Output: List of [segmentation_result, city] pairs. If not found, returns empty list.
+    """
+    db = get_firestore_client()
+    doc_ref = db.collection('segmentation_location_pairs').document('latest')
+    doc = doc_ref.get()
+    pairs = []
+    if doc.exists:
+        data = doc.to_dict()
+        raw_pairs = data.get("pairs", [])
+        for item in raw_pairs:
+            segm = item.get("segmentation_result")
+            # Try city, fallback to main_location, fallback to user_location, fallback to country if city not present
+            city = item.get("city")
+            if not city:
+                city = item.get("main_location") or item.get("user_location") or item.get("country", "")
+            if segm is not None and city is not None:
+                pairs.append([segm, city])
+    return pairs
+
 
 def create_marketing_image(
     prompt: str,
@@ -66,6 +61,7 @@ def create_marketing_image(
     aspect_ratio: str = "1:1",
     image_size: str = "1K",
     output_dir: str = "generated",
+    name: str = "segmentation_location",
 ):
     """
     Generate marketing image(s) using Google's Imagen through google-genai.
@@ -80,9 +76,9 @@ def create_marketing_image(
     Returns:
         A list of saved image file paths.
     """
-    api_key = os.environ.get("GEMINI_API_KEY")
+    api_key = os.environ.get("GOOGLE_API_KEY")
     if not api_key:
-        raise RuntimeError("GEMINI_API_KEY environment variable is not set.")
+        raise RuntimeError("GOOGLE_API_KEY environment variable is not set.")
 
     client = genai.Client(api_key=api_key)
 
@@ -106,12 +102,18 @@ def create_marketing_image(
 
     saved_paths = []
     for n, generated_image in enumerate(result.generated_images):
-        # Result object exposes a PIL image via .image
-        path = out_dir / f"marketing_image_{n}.jpg"
-        generated_image.image.save(path.as_posix())
-        saved_paths.append(path.as_posix())
+        # Convert PIL Image to bytes
+        buf = io.BytesIO()
+        generated_image.image.save(buf, format="JPEG")
+        content_bytes = buf.getvalue()
+        # Save to GCS with provided name (e.g., 'segmentation_location')
+        gcs_uri = save_content_to_gcs(content_bytes, f"{name}_{n}.jpg", content_type="image/jpeg")
+        saved_paths.append(gcs_uri)
 
     return saved_paths
+
+
+
 
 
 
@@ -129,20 +131,17 @@ Creative agent. Creates content for the adgen project.
 """
 
 
-CREATIVE_AGENT_INSTRUCTION = f"""
+CREATIVE_AGENT_INSTRUCTION = """
 You are the Creative Agent for the AdGen project. You are responsible for creating content for the adgen project.
 
 You will be given a segmentation by master agent and you will write a detailed, engaging, creative and marketingly valuable prompt for the given segment to create content.
-Your given input for each user:
-
-{"user_id": "user_123",
-"segmentation": "segmentation_result_1",
-"main_location": "City, USA",
-"target_location": "City,France"}
+Your given input for each segmentation and location pair:
+{"segmentation_result": "segmentation_result_1",
+"location": "City, USA"}
 
 YOUR SKILLS:
-> You will blend main and target location to have a strategy on how to create content for the given segment.
-> Use segment & locations to create location and segment specific prompt. 
+> You will use main  location to have a strategy on how to create content for the given segment.
+> Use segment & location to create location and segment specific prompt. 
 > Write the prompt using all details and write every single detail. 
 
 A. If master agent asks you to create an ad for e-commerce website:
@@ -159,20 +158,11 @@ INSTRUCTIONS:
 
 === YOUR WORKFLOW ===
 > WHEN MASTER AGENT TELLS YOU TO CREATE CONTENT FOR THE GIVEN SEGMENT TO WEBSITE:
-1.
-1. Use read_users_to_create_content tool to get the users to create content.
-1.1. This will return list of users with their location and segmentation result.
-{
-    "users": [
-        {
-            "user_id": "user_123",
-            "user_location": "City, USA",
-            "segmentation_result": "segmentation_result_1"
-        },
-        ...
-    ]
-}
-2. For each user, create a af
+1.read read_pairs_to_create_content tool to get the pairs to create content. 
+2. for each pair in the array, use create_marketing_image tool to create a marketing image for the given pair. 
+2.1. Follow the instructions for create_marketing_image tool to write the best prompt for the given pair.
+2.2. provide the prompt to tool. 
+
 """
 
 
@@ -182,6 +172,7 @@ creative_agent = Agent(
     description=CREATIVE_AGENT_DESCRIPTION,
     instruction=CREATIVE_AGENT_INSTRUCTION,
     tools=[
+    read_pairs_to_create_content,
     create_marketing_image, 
     create_marketing_video
     ],
