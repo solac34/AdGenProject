@@ -7,23 +7,29 @@ export default function TopNav() {
   const pathname = usePathname();
   const items = [
     { href: "/", label: "Dashboard" },
-    { href: "/settings", label: "Agent Settings" }
+    { href: "/settings", label: "Agent Settings" },
+    { href: "/segmentations", label: "Segmentations" }
   ];
-  const index = Math.max(
-    0,
-    items.findIndex((i) => i.href === pathname)
-  );
+  const index =
+    items.findIndex((i) => i.href === pathname || (i.href !== "/" && pathname.startsWith(i.href))) ?? 0;
+  const activeIndex = index < 0 ? 0 : index;
 
   return (
     <div className="mb-6 flex justify-center pt-4">
-      <nav className="relative grid grid-cols-2 items-center rounded-full border border-white/10 bg-white/5 p-1 backdrop-blur-sm">
+      <nav
+        className="relative grid items-center rounded-full border border-white/10 bg-white/5 p-1 backdrop-blur-sm"
+        style={{ gridTemplateColumns: `repeat(${items.length}, minmax(0, 1fr))` }}
+      >
         <motion.div
           className="absolute top-1 bottom-1 rounded-full bg-brand-blue/25 shadow-glow"
-          style={{ width: "calc(100% / 2)", left: `calc(${index} * (100% / 2))` }}
+          style={{
+            width: `calc(100% / ${items.length})`,
+            left: `calc(${activeIndex} * (100% / ${items.length}))`
+          }}
           transition={{ type: "spring", stiffness: 350, damping: 28 }}
         />
         {items.map((item) => {
-          const active = pathname === item.href;
+          const active = pathname === item.href || (item.href !== "/" && pathname.startsWith(item.href));
           return (
             <Link
               key={item.href}

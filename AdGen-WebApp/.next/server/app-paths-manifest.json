@@ -1,7 +1,6 @@
 {
-  "/api/instructions/[doc]/route": "app/api/instructions/[doc]/route.js",
   "/page": "app/page.js",
+  "/segmentations/page": "app/segmentations/page.js",
   "/agent-settings/page": "app/agent-settings/page.js",
-  "/settings/page": "app/settings/page.js",
-  "/segmentations/page": "app/segmentations/page.js"
+  "/settings/page": "app/settings/page.js"
 }
