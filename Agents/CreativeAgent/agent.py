@@ -70,7 +70,7 @@ def create_marketing_image(
     prompt: str,
     *,
     number_of_images: int = 1,
-    aspect_ratio: str = "1:1",
+    aspect_ratio: str = "16:9",
     output_dir: str = "generated",
     name: str = "segmentation_location",
 ):
@@ -80,7 +80,7 @@ def create_marketing_image(
     Args:
         prompt: The generation prompt to guide the image.
         number_of_images: How many images to create (demo default 1).
-        aspect_ratio: Imagen aspect ratio, e.g. \"1:1\", \"16:9\".
+        aspect_ratio: Imagen aspect ratio, e.g. \"16:9\".
         output_dir: Directory to save images into.
 
     Returns:
@@ -160,7 +160,7 @@ def create_marketing_images_batch(items: List[Dict[str, Any]]):
         uris = create_marketing_image(
             prompt=prompt,
             number_of_images=item.get("number_of_images", 1),
-            aspect_ratio=item.get("aspect_ratio", "1:1"),
+            aspect_ratio=item.get("aspect_ratio", "16:9"),
             output_dir=item.get("output_dir", "generated"),
             name=name,
         )
@@ -205,7 +205,7 @@ A. If master agent asks you to create an ad for e-commerce website:
 4. User may have more than one segmentation, blend them the best way possible. 
 
 INSTRUCTIONS:
-1. use 1024x1024 resolution.
+1. use 16:9 aspect ratio (e.g., 1920x1080).
 2. This ad will be seen as a banner ad in the main page of the website.
 3. When user sees this ad, user must want to buy products and spend more money.
 
