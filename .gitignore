@@ -22,6 +22,8 @@ __pycache__/
 # Next.js build artifacts
 .next/
 out/
+*/.next/
+*/out/
 
 # Python cache directories (specific paths for cleanup)
 /Agents/DataAnalyticAgent/__pycache__/
