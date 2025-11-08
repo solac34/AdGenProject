@@ -16,12 +16,18 @@ from MasterAgent.firestore_helper import get_firestore_client
 def save_content_to_gcs(content: bytes, object_name: str, *, content_type: str = "application/octet-stream", bucket_name: str | None = None) -> str:
     """
     Save arbitrary content bytes to Google Cloud Storage.
-    - bucket is resolved from env var GCS_CONTENT_BUCKET or defaults to 'ecommerce-ads-contents'
+    - bucket is resolved from env var GCS_EC_BUCKET_NAME (or GCS_CONTENT_BUCKET for backward compatibility)
+      and defaults to 'ecommerce-ad-contents'
     - object_name supports folder paths, e.g. 'segmentation_location/image_0.jpg'
     Returns a public HTTPS URL if possible (or a signed URL), else gs:// URI.
     """
     
-    bucket = bucket_name or os.getenv("GCS_CONTENT_BUCKET") or "ecommerce-ads-contents"
+    bucket = (
+        bucket_name
+        or os.getenv("GCS_EC_BUCKET_NAME")
+        or os.getenv("GCS_CONTENT_BUCKET")
+        or "ecommerce-ad-contents"
+    )
     
     # Use service account credentials from env if available
     creds_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS_AI")
@@ -91,6 +97,7 @@ def create_marketing_image(
     aspect_ratio: str = "16:9",
     output_dir: str = "generated",
     name: str = "segmentation_location",
+    object_name: str | None = None,
 ):
     """
     Generate marketing image(s) using Google's Imagen through google-genai.
@@ -152,8 +159,9 @@ def create_marketing_image(
     for n, generated_image in enumerate(result.generated_images):
         # Get image bytes directly from the response
         content_bytes = generated_image.image.image_bytes
-        # Save to GCS with provided name (e.g., 'segmentation_location')
-        gcs_uri = save_content_to_gcs(content_bytes, f"{name}_{n}.jpg", content_type="image/jpeg")
+        # Save to GCS using provided nested object path if present
+        target_object = object_name or f"{name}/{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}-{uuid4().hex}_{n}.jpg"
+        gcs_uri = save_content_to_gcs(content_bytes, target_object, content_type="image/jpeg")
         saved_paths.append(gcs_uri)
 
     return saved_paths
@@ -168,10 +176,23 @@ def create_marketing_images_batch(items: List[Dict[str, Any]]):
     Returns:
         List of {"name": str, "uris": ["gs://..."] }
     """
+    def norm_folder(s: str) -> str:
+        return str(s or "").strip().replace("/", "_").replace("\\", "_").replace(" ", "_")
+
     results = []
     for item in items or []:
         prompt = item.get("prompt", "").strip()
         name = item.get("name", "segmentation_location")
+        segmentation_name = item.get("segmentation_name", "") or item.get("segmentation_result", "")
+        city = item.get("city", "")
+        country = item.get("country", "")
+        # Build nested folder path following rule in DataAnalyticAgent (line ~609)
+        # segmentation parts are split by '-' and appended sequentially as folders
+        seg_parts = [p.strip() for p in str(segmentation_name).split("-") if p.strip()]
+        nested_parts = seg_parts + ([norm_folder(country)] if country else []) + ([norm_folder(city)] if city else [])
+        base_prefix = "/".join(nested_parts)
+        # Final object path under the deepest folder
+        object_name = f"{base_prefix}/{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}-{uuid4().hex}.jpg"
         if not prompt:
             results.append({"name": name, "uris": [], "error": "empty prompt"})
             continue
@@ -181,6 +202,7 @@ def create_marketing_images_batch(items: List[Dict[str, Any]]):
             aspect_ratio=item.get("aspect_ratio", "16:9"),
             output_dir=item.get("output_dir", "generated"),
             name=name,
+            object_name=object_name,
         )
         # Assign back to Firestore if doc_id provided
         try:

@@ -257,7 +257,7 @@ def compare_event_counts(data_reference: dict):
 
 def read_users_to_segmentate():
     """
-    Firestore'dan state=pending olan 20 kullanıcıyı alır ve 
+    Firestore'dan state=pending olan 10 kullanıcıyı alır ve 
     BigQuery'den bu kullanıcıların tüm event ve orderlarını çeker.
     
     Returns:
@@ -293,7 +293,7 @@ def read_users_to_segmentate():
     pending_users_query = (
         db.collection('users_to_segmentate')
         .where('state', '==', 'pending')
-        .limit(20)
+        .limit(10)
         .stream()
     )
     
@@ -381,10 +381,7 @@ def write_user_segmentation_result(user_id: str, segmentation_result: str):
     
     # 2. users_to_segmentate'te state'i success yap
     pending_doc_ref = db.collection('users_to_segmentate').document(user_id)
-    pending_doc_ref.update({
-        'state': 'success',
-        'completed_at': firestore.SERVER_TIMESTAMP
-    })
+    pending_doc_ref.delete()
     
     print(f"✅ Kullanıcı {user_id} segmentasyonu tamamlandı (state: success)")
     
@@ -542,7 +539,7 @@ You will always return the result to the master agent without interrupting the e
     }
 
 📊 Tool 3: read_users_to_segmentate()
-→ Purpose: Get 20 pending users and their events/orders from BigQuery
+→ Purpose: Get 10 pending users and their events/orders from BigQuery
 → Parameters: NONE
 → Returns: dict with status and users array
 → What it does internally:
@@ -609,6 +606,8 @@ Step 4.1.3. Based on user's total spent. 0-250 low 250-1000 medium 1000+ high
 Step 4.1.4. Based on gift wrap in last session. Yes or No
 Step 4.1.5. Based on shopping cart abandonment in last session. Yes or No
 Step 4.1.6. Based on different location in last session. Yes or No 
+Step 4.2. Expected result schema is session2EventCountLow-session2OrderCountLow-totalSpentLow-giftWrapYes-shoppingCartAbandonmentYes-differentLocationNo
+
 
 
 

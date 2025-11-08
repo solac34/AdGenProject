@@ -1,6 +1,7 @@
 "use client";
 import React, { useEffect, useState } from "react";
 import { useAuth } from "@/components/AuthContext";
+import { fetchCityCountry } from "@/lib/geo";
 
 export default function AdBox({ imageUrl: propUrl, href }: { imageUrl?: string; href?: string }) {
   const { user } = useAuth();
@@ -10,13 +11,27 @@ export default function AdBox({ imageUrl: propUrl, href }: { imageUrl?: string; 
   useEffect(() => {
     let cancelled = false;
     async function run() {
-      if (propUrl || !user?.id) return;
+      if (propUrl) return;
       setLoading(true);
       try {
+        // Prepare payload:
+        // - If user logged in → send user_id
+        // - Else (anonymous) → send city/country derived on client
+        let payload: Record<string, unknown> = {};
+        if (user?.id) {
+          payload.user_id = user.id;
+        } else {
+          const cc = await fetchCityCountry();
+          if (cc) {
+            const [cityRaw, countryRaw] = cc.split(",").map((s) => (s || "").trim());
+            if (cityRaw) payload.city = cityRaw;
+            if (countryRaw) payload.country = countryRaw;
+          }
+        }
         const res = await fetch("/api/ad-image", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ user_id: user.id })
+          body: JSON.stringify(payload)
         });
         if (res.ok) {
           const j = await res.json();
