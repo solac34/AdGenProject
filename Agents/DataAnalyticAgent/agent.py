@@ -263,6 +263,7 @@ def read_users_to_segmentate():
     Returns:
         dict: {
             "status": "success" | "no_pending_users",
+            "pending_total": int,
             "users": [
                 {
                     "user_id": "...",
@@ -278,6 +279,17 @@ def read_users_to_segmentate():
     # Firestore'dan pending kullanıcıları al
     db = get_firestore_client()
     
+    # Pending toplam sayısını ölç (karar için kullanılacak)
+    try:
+        pending_total = sum(
+            1
+            for _ in db.collection('users_to_segmentate')
+            .where('state', '==', 'pending')
+            .stream()
+        )
+    except Exception:
+        pending_total = 0
+    
     pending_users_query = (
         db.collection('users_to_segmentate')
         .where('state', '==', 'pending')
@@ -291,7 +303,8 @@ def read_users_to_segmentate():
         print("⚠️ Pending durumunda kullanıcı bulunamadı")
         return {
             "status": "no_pending_users",
-            "users": []
+            "users": [],
+            "pending_total": pending_total
         }
     
     print(f"✅ {len(pending_users)} pending kullanıcı bulundu")
@@ -337,7 +350,8 @@ def read_users_to_segmentate():
     
     return {
         "status": "success",
-        "users": users_data
+        "users": users_data,
+        "pending_total": pending_total
     }
 
 
@@ -396,8 +410,14 @@ def write_segmentation_results_to_firestore(segmentation_results: dict):
 def write_segmentation_location_pairs_to_firestore():
     """
     For each user in user_segmentations, fetches their segmentation_result and user_location (city, country) from users collection.
-    Writes an array of pairs (segmentation_result, city, country) to Firestore collection 'segmentation_location_pairs',
-    document 'latest'.
+    Creates/updates a document in 'segmentations' collection for each unique
+    (segmentation_result, city, country) triple.
+
+    - Document ID format: segmentation_city_country (all normalized with underscores)
+    - Fields written:
+        segmentation_name, city, country
+        imageUrl: "" (ONLY when creating a new document)
+        updated_at: server timestamp
     """
     db = get_firestore_client()
 
@@ -405,7 +425,10 @@ def write_segmentation_location_pairs_to_firestore():
     segmentations_ref = db.collection('user_segmentations')
     segmentation_docs = segmentations_ref.stream()
 
-    pairs = []
+    def normalize(s: str) -> str:
+        return str(s or "").strip().replace("/", "_").replace("\\", "_").replace(",", "").replace(" ", "_")
+
+    written = 0
     for doc in segmentation_docs:
         user_id = doc.id
         segmentation_result = doc.to_dict().get('segmentation_result', None)
@@ -430,22 +453,26 @@ def write_segmentation_location_pairs_to_firestore():
         # Fallbacks if missing
         city = city if city else ''
         country = country if country else ''
-        pairs.append({
-            "segmentation_result": segmentation_result,
+        # Build doc_id as segmentation_city_country with underscores
+        doc_id = f"{normalize(segmentation_result)}_{normalize(city)}_{normalize(country)}"
+        seg_doc_ref = db.collection('segmentations').document(doc_id)
+        existing = seg_doc_ref.get()
+        base_payload = {
+            "segmentation_name": segmentation_result,
             "city": city,
             "country": country,
-            "user_id": user_id
-        })
+            "updated_at": firestore.SERVER_TIMESTAMP,
+        }
+        if existing.exists:
+            # Preserve existing imageUrl if any; just upsert core fields
+            seg_doc_ref.set(base_payload, merge=True)
+        else:
+            # Create with empty imageUrl so CreativeAgent can pick it up
+            base_payload["imageUrl"] = ""
+            seg_doc_ref.set(base_payload, merge=True)
+        written += 1
 
-    # Write array to Firestore
-    doc_ref = db.collection('segmentation_location_pairs').document('latest')
-    doc_ref.set({
-        "pairs": pairs,
-        "count": len(pairs),
-        "timestamp": firestore.SERVER_TIMESTAMP
-    })
-
-    return f"{len(pairs)} segmentation/location pairs written to segmentation_location_pairs/latest"
+    return f"{written} segmentation documents upserted into 'segmentations' with underscore IDs"
 
 
 DATA_ANALYTIC_AGENT_INSTRUCTION = """
@@ -568,18 +595,11 @@ Immediately AFTER comparing, you MUST call write_user_activity_to_firestore with
 STEP 3:
 Run read_users_to_segmentate tool to get the users to segmentate.
 If there are no users to segmentate, return to the master agent and report that no users were segmented.
-Below is example of the return value if there are users to segmentate:
-  {
-    "status": "success",
-    "users": [
-      {
-        "user_id": "user_123",
-        "events": [{event_type: "page_view", ...}, ...],
-        "orders": [{order_id: "ord_1", total_amount: 150, ...}, ...]
-      },
-      ...  (up to 20 users)
-    ]
-  }
+Important: Do NOT early-return based on pending length. Process up to 20 users now.
+After finishing all writes (STEP 5), decide final status using 'pending_total' returned from STEP 3:
+  let remaining = pending_total - 20
+  If remaining > 0 => return {"status": "continue"}
+  Else => return {"status": "finished"}
 
 STEP 4: Perform segmentation on each user (AI analysis)
 STEP 4.1. Give 6 segmentations each based on 6 different criteria.
@@ -599,15 +619,14 @@ STEP 5: For each user, call write_user_segmentation_result(user_id, result)
   3. Return confirmation
 
 
-STEP 7: return a final compact summary to the master agent. If no users, then pass empty users object. Do NOT include batch logs or raw data:
-{
-  "status": "finished",
-  "users": {'user_id': 'user_123', 'segmentation_result': 'segmentation_result_1', ...},
-}
+STEP 6 (FINAL RETURN FORMAT - STRICT):
+Return ONLY a minimal JSON object. No prose, no lists, no logs:
+  {"status": "finished"}   or   {"status": "continue"}
 
-SIDE TASK. Write segmentation location pairs to firestore:
-1. run write_segmentation_location_pairs_to_firestore tool to write the segmentation location pairs to firestore.
-2. return confirmation: "Segmentation location pairs written to firestore"
+SIDE TASK. Populate 'segmentations' collection (doc_id = segmentation_city_country):
+1. Run write_segmentation_location_pairs_to_firestore tool to upsert docs into 'segmentations'.
+2. Behavior: For each user segmentation, create/update a doc with fields {segmentation_name, city, country}. When creating a new doc, set imageUrl="".
+3. Return confirmation like: "N segmentation documents upserted into 'segmentations' with underscore IDs"
 
 SIDE TASK. When Master Agent says: "Write user activity counts to firestore"
 

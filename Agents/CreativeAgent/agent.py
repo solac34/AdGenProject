@@ -18,7 +18,7 @@ def save_content_to_gcs(content: bytes, object_name: str, *, content_type: str =
     Save arbitrary content bytes to Google Cloud Storage.
     - bucket is resolved from env var GCS_CONTENT_BUCKET or defaults to 'ecommerce-ads-contents'
     - object_name supports folder paths, e.g. 'segmentation_location/image_0.jpg'
-    Returns gs:// URI of the uploaded object.
+    Returns a public HTTPS URL if possible (or a signed URL), else gs:// URI.
     """
     
     bucket = bucket_name or os.getenv("GCS_CONTENT_BUCKET") or "ecommerce-ads-contents"
@@ -39,31 +39,49 @@ def save_content_to_gcs(content: bytes, object_name: str, *, content_type: str =
         object_name = f"{base}/{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}-{uuid4().hex}.jpg"
     blob = bucket_obj.blob(object_name)
     blob.upload_from_string(content, content_type=content_type)
-    # Optionally you can make public or set cache-control later
-    return f"gs://{bucket}/{object_name}"
+    # Try to make the object publicly accessible and return its public URL.
+    try:
+        blob.make_public()
+        return blob.public_url
+    except Exception:
+        # Fallback: signed URL (7 days). If this fails, return gs:// URI.
+        try:
+            return blob.generate_signed_url(expiration=3600 * 24 * 7, method="GET")
+        except Exception:
+            return f"gs://{bucket}/{object_name}"
 
 
-def read_pairs_to_create_content():
+def read_segmentations_to_generate(limit: int = 50):
     """
-    Reads segmentation_location_pairs from Firestore and returns an array of [segmentation_result, location] pairs.
-    Output: List of [segmentation_result, city] pairs. If not found, returns empty list.
+    Read 'segmentations' collection and return items with empty imageUrl.
+    Output: List[Dict] having: segmentation_name, city, country, doc_id, name
+    - doc_id is a normalized 'segmentation_city_country' (underscores)
+    - name is used for grouping objects in GCS
     """
+    def normalize(s: str) -> str:
+        return str(s).strip().replace("/", "_").replace("\\", "_").replace(",", "").replace(" ", "_")
+
+        
     db = get_firestore_client()
-    doc_ref = db.collection('segmentation_location_pairs').document('latest')
-    doc = doc_ref.get()
-    pairs = []
-    if doc.exists:
-        data = doc.to_dict()
-        raw_pairs = data.get("pairs", [])
-        for item in raw_pairs:
-            segm = item.get("segmentation_result")
-            # Try city, fallback to main_location, fallback to user_location, fallback to country if city not present
-            city = item.get("city")
-            if not city:
-                city = item.get("main_location") or item.get("user_location") or item.get("country", "")
-            if segm is not None and city is not None:
-                pairs.append([segm, city])
-    return pairs
+    col = db.collection('segmentations')
+    # Fetch a page and filter locally for simplicity
+    docs = col.limit(limit).stream()
+    items: List[Dict[str, Any]] = []
+    for d in docs:
+        data = d.to_dict() or {}
+        seg_name = data.get("segmentation_name") or data.get("segmentation") or ""
+        city = data.get("city") or ""
+        country = data.get("country") or ""
+        image_url = data.get("imageUrl") or ""
+        if not seg_name or not city:
+            continue
+        if image_url:
+            continue
+        # Use underscore-based ID format for consistency with API
+        doc_id = f"{normalize(seg_name)}_{normalize(city)}_{normalize(country)}"
+        name = f"{normalize(seg_name)}_{normalize(city)}_{normalize(country)}"
+        items.append({"segmentation_name": seg_name, "city": city, "country": country, "doc_id": doc_id, "name": name})
+    return items
 
 
 def create_marketing_image(
@@ -164,6 +182,23 @@ def create_marketing_images_batch(items: List[Dict[str, Any]]):
             output_dir=item.get("output_dir", "generated"),
             name=name,
         )
+        # Assign back to Firestore if doc_id provided
+        try:
+            doc_id = item.get("doc_id")
+            if doc_id and uris:
+                db = get_firestore_client()
+                seg_doc = db.collection("segmentations").document(str(doc_id))
+                payload = {
+                    "imageUrl": uris[0],
+                    "updated_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+                }
+                for k in ("segmentation_name", "city", "country"):
+                    if item.get(k):
+                        payload[k] = item[k]
+                seg_doc.set(payload, merge=True)
+        except Exception as e:
+            results.append({"name": name, "uris": uris, "warning": f"firestore_update_failed: {e}"})
+            continue
         results.append({"name": name, "uris": uris})
     return results
 
@@ -211,10 +246,9 @@ INSTRUCTIONS:
 
 === YOUR WORKFLOW ===
 > WHEN MASTER AGENT TELLS YOU TO CREATE CONTENT FOR THE GIVEN SEGMENT TO WEBSITE:
-1.read read_pairs_to_create_content tool to get the pairs to create content. 
-2. for each pair in the array, use create_marketing_image tool to create a marketing image for the given pair. 
-2.1. Follow the instructions for create_marketing_image tool to write the best prompt for the given pair.
-2.2. provide the prompt to tool. 
+1. Use read_segmentations_to_generate to list segmentations missing imageUrl from the 'segmentations' collection.
+2. For each item, craft a detailed prompt and call create_marketing_image (16:9, 1K).
+3. Provide doc_id when calling create_marketing_images_batch so the generated image URL is written back to 'segmentations/<doc_id>.imageUrl'.
 
 """
 
@@ -225,7 +259,7 @@ creative_agent = Agent(
     description=CREATIVE_AGENT_DESCRIPTION,
     instruction=CREATIVE_AGENT_INSTRUCTION,
     tools=[
-    read_pairs_to_create_content,
+    read_segmentations_to_generate,
     create_marketing_image,
     create_marketing_images_batch,
     create_marketing_video
