@@ -29,13 +29,33 @@ def save_content_to_gcs(content: bytes, object_name: str, *, content_type: str =
         or "ecommerce-ad-contents"
     )
     
-    # Use service account credentials from env if available
-    creds_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS_AI")
-    if creds_path and os.path.exists(creds_path):
-        credentials = service_account.Credentials.from_service_account_file(creds_path)
-        client = storage.Client(credentials=credentials)
+    # Try environment-based service account JSON first (Cloud Run compatible)
+    sa_json = os.getenv('GCP_SERVICE_ACCOUNT_JSON') or os.getenv('GCP_SERVICE_ACCOUNT_JSON_BQ')
+    if sa_json:
+        try:
+            import json
+            import base64
+            info = json.loads(sa_json) if sa_json.strip().startswith('{') else json.loads(base64.b64decode(sa_json).decode('utf-8'))
+            credentials = service_account.Credentials.from_service_account_info(
+                info,
+                scopes=[
+                    'https://www.googleapis.com/auth/cloud-platform',
+                    'https://www.googleapis.com/auth/devstorage.read_write',
+                ],
+            )
+            client = storage.Client(credentials=credentials)
+        except Exception:
+            # Fall back to default ADC
+            client = storage.Client()
     else:
-        client = storage.Client()
+        # Fallback to file-based credentials or default ADC
+        creds_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS_AI")
+        if creds_path and os.path.exists(creds_path):
+            credentials = service_account.Credentials.from_service_account_file(creds_path)
+            client = storage.Client(credentials=credentials)
+        else:
+            # Use default ADC (Application Default Credentials)
+            client = storage.Client()
     
     bucket_obj = client.bucket(bucket)
     # Ensure a subfolder path is used and uniqueness if plain name provided

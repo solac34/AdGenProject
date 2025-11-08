@@ -10,6 +10,7 @@ import sys
 import json
 import base64
 import logging
+import threading
 from pathlib import Path
 from flask import Flask, request, jsonify
 
@@ -19,6 +20,7 @@ sys.path.insert(0, str(current_dir))
 
 # Import the root agent (MasterAgent with all sub-agents)
 from MasterAgent.agent import root_agent
+from pubsub_handler import create_pubsub_app
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -49,11 +51,49 @@ def setup_environment():
     port = int(os.getenv('PORT', 8080))
     os.environ['ADK_PORT'] = str(port)
     
-    # Clear any file-based credential paths that might interfere with Cloud Run's default service account
+    # Clear ALL credential-related environment variables that might interfere with Cloud Run's default service account
     # This prevents the "File not found" error for local credential files
-    if 'GOOGLE_APPLICATION_CREDENTIALS' in os.environ and not os.path.exists(os.environ['GOOGLE_APPLICATION_CREDENTIALS']):
-        print(f"⚠️ Removing invalid GOOGLE_APPLICATION_CREDENTIALS path: {os.environ['GOOGLE_APPLICATION_CREDENTIALS']}")
-        del os.environ['GOOGLE_APPLICATION_CREDENTIALS']
+    credential_vars = [
+        'GOOGLE_APPLICATION_CREDENTIALS',
+        'GOOGLE_APPLICATION_CREDENTIALS_AI', 
+        'GOOGLE_APPLICATION_CREDENTIALS_BQ',
+        'BQ_KEYFILE'
+    ]
+    
+    for var in credential_vars:
+        if var in os.environ:
+            creds_path = os.environ[var]
+            if not os.path.exists(creds_path):
+                print(f"⚠️ Removing invalid {var} path: {creds_path}")
+                del os.environ[var]
+            else:
+                print(f"✅ Using service account file from {var}: {creds_path}")
+    
+    # Force Cloud Run to use default service account by ensuring no file-based credentials
+    # Check if we're in Cloud Run environment
+    is_cloud_run = os.getenv('K_SERVICE') is not None or os.getenv('GOOGLE_CLOUD_RUN_SERVICE') is not None
+    
+    if is_cloud_run:
+        print("🔐 Detected Cloud Run environment - forcing default service account usage")
+        # Remove any remaining credential file references
+        for var in credential_vars:
+            if var in os.environ:
+                print(f"⚠️ Force removing {var} in Cloud Run environment")
+                del os.environ[var]
+    
+    # Ensure project environment variables are set for ADC
+    project_id = os.getenv('GOOGLE_CLOUD_PROJECT')
+    if project_id:
+        os.environ['GCLOUD_PROJECT'] = project_id
+        os.environ['GCP_PROJECT'] = project_id
+        os.environ['GCP_PROJECT_ID'] = project_id
+        print(f"✅ Project set for ADC: {project_id}")
+    
+    # Set additional environment variables that ADK might need
+    if not os.getenv('GOOGLE_APPLICATION_CREDENTIALS'):
+        print("🔐 Using Cloud Run default service account (ADC)")
+        # Explicitly tell Google libraries to use ADC
+        os.environ['GOOGLE_AUTH_SUPPRESS_CREDENTIALS_WARNINGS'] = 'true'
     
     print(f"🚀 Starting AdGen Agents on port {port}")
     print(f"📍 Project: {os.getenv('GOOGLE_CLOUD_PROJECT', 'Not set')}")
@@ -75,6 +115,7 @@ def main():
     """Main function to start both ADK and Pub/Sub servers."""
     setup_environment()
     
+    
     # Check if we should run in Pub/Sub only mode
     pubsub_only = os.getenv('PUBSUB_ONLY', 'false').lower() == 'true'
     
@@ -90,6 +131,13 @@ def main():
         
         # Import ADK server after environment setup
         from google.adk.server import start_server
+        
+        # Final check: ensure no invalid credentials before starting ADK
+        if 'GOOGLE_APPLICATION_CREDENTIALS' in os.environ:
+            creds_path = os.environ['GOOGLE_APPLICATION_CREDENTIALS']
+            if not os.path.exists(creds_path):
+                print(f"🚨 Final cleanup: removing invalid GOOGLE_APPLICATION_CREDENTIALS: {creds_path}")
+                del os.environ['GOOGLE_APPLICATION_CREDENTIALS']
         
         # Start the ADK server with the root agent (main thread)
         start_server(

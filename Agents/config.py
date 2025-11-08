@@ -17,6 +17,10 @@ class Config:
     GOOGLE_GENAI_USE_VERTEXAI: bool = os.getenv('GOOGLE_GENAI_USE_VERTEXAI', 'True').lower() == 'true'
     GOOGLE_API_KEY: Optional[str] = os.getenv('GOOGLE_API_KEY')
     
+    # Service Account Configuration (for Cloud Run)
+    GCP_SERVICE_ACCOUNT_JSON: Optional[str] = os.getenv('GCP_SERVICE_ACCOUNT_JSON')
+    GCP_SERVICE_ACCOUNT_JSON_BQ: Optional[str] = os.getenv('GCP_SERVICE_ACCOUNT_JSON_BQ')
+    
     # Cloud Run Configuration
     PORT: int = int(os.getenv('PORT', 8080))
     
