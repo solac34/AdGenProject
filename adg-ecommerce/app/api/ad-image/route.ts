@@ -188,22 +188,22 @@ export async function POST(request: Request) {
 
     if (userId) {
       // Location from user profile (users/{id}.user_location)
-      const userDoc = await firestore.collection("users").doc(userId).get();
-      const userLocation = (userDoc.exists ? (userDoc.get("user_location") as string | undefined) : undefined) || "";
+    const userDoc = await firestore.collection("users").doc(userId).get();
+    const userLocation = (userDoc.exists ? (userDoc.get("user_location") as string | undefined) : undefined) || "";
       const fromDoc = parseCityCountry(userLocation);
       city = fromDoc.city || bodyCity || locCityFromBody || "";
       country = fromDoc.country || bodyCountry || locCountryFromBody || "";
 
       // Segmentation from user_segmentations
-      let segDoc = await firestore.collection("user_segmentations").doc(`user_${userId}`).get();
+    let segDoc = await firestore.collection("user_segmentations").doc(`user_${userId}`).get();
       if (!segDoc.exists) {
         // Some writers use doc id = userId
         segDoc = await firestore.collection("user_segmentations").doc(userId).get();
       }
-      if (!segDoc.exists) {
-        const q = await firestore.collection("user_segmentations").where("user_id", "==", userId).limit(1).get();
-        if (!q.empty) segDoc = q.docs[0];
-      }
+    if (!segDoc.exists) {
+      const q = await firestore.collection("user_segmentations").where("user_id", "==", userId).limit(1).get();
+      if (!q.empty) segDoc = q.docs[0];
+    }
       segmentation = (segDoc.exists ? (segDoc.get("segmentation_result") as string | undefined) : undefined) || "";
     } else {
       // Anonymous – use body-provided location

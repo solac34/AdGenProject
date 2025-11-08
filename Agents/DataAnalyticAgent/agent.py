@@ -293,7 +293,7 @@ def read_users_to_segmentate():
     pending_users_query = (
         db.collection('users_to_segmentate')
         .where('state', '==', 'pending')
-        .limit(10)
+        .limit(5)
         .stream()
     )
     
@@ -385,7 +385,7 @@ def write_user_segmentation_result(user_id: str, segmentation_result: str):
     
     print(f"✅ Kullanıcı {user_id} segmentasyonu tamamlandı (state: success)")
     
-    return f"User {user_id} segmentation result written and marked as success"
+    return "success"
 
 
 def write_segmentation_results_to_firestore(segmentation_results: dict):
