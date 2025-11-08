@@ -6,6 +6,7 @@ from pathlib import Path
 from uuid import uuid4
 from datetime import datetime
 import io
+from typing import List, Dict, Any
 from MasterAgent.firestore_helper import get_firestore_client
 
 
@@ -114,6 +115,32 @@ def create_marketing_image(
 
 
 
+def create_marketing_images_batch(items: List[Dict[str, Any]]):
+    """
+    Batch helper to generate multiple marketing images.
+    Args:
+        items: List of {"prompt": str, "name": str, optional overrides...}
+    Returns:
+        List of {"name": str, "uris": ["gs://..."] }
+    """
+    results = []
+    for item in items or []:
+        prompt = item.get("prompt", "").strip()
+        name = item.get("name", "segmentation_location")
+        if not prompt:
+            results.append({"name": name, "uris": [], "error": "empty prompt"})
+            continue
+        uris = create_marketing_image(
+            prompt=prompt,
+            number_of_images=item.get("number_of_images", 1),
+            aspect_ratio=item.get("aspect_ratio", "1:1"),
+            image_size=item.get("image_size", "1K"),
+            output_dir=item.get("output_dir", "generated"),
+            name=name,
+        )
+        results.append({"name": name, "uris": uris})
+    return results
+
 
 
 
@@ -173,7 +200,8 @@ creative_agent = Agent(
     instruction=CREATIVE_AGENT_INSTRUCTION,
     tools=[
     read_pairs_to_create_content,
-    create_marketing_image, 
+    create_marketing_image,
+    create_marketing_images_batch,
     create_marketing_video
     ],
 )
