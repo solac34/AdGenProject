@@ -50,10 +50,18 @@ echo -e "${BLUE}🔌 Enabling required APIs...${NC}"
 gcloud services enable cloudbuild.googleapis.com
 gcloud services enable run.googleapis.com
 gcloud services enable containerregistry.googleapis.com
+gcloud services enable storage.googleapis.com
 
-# Build the Docker image for AMD64 platform and push
-echo -e "${BLUE}🏗️  Building Docker image for AMD64 platform...${NC}"
-docker buildx build --platform linux/amd64 -t $IMAGE_NAME . --push
+# Create Cloud Build bucket if it doesn't exist
+BUCKET_NAME="${PROJECT_ID}_cloudbuild"
+echo -e "${BLUE}🪣 Setting up Cloud Build storage...${NC}"
+if ! gsutil ls -b gs://$BUCKET_NAME &>/dev/null; then
+    gsutil mb gs://$BUCKET_NAME
+fi
+
+# Build the Docker image using Google Cloud Build
+echo -e "${BLUE}🏗️  Building Docker image with Google Cloud Build...${NC}"
+gcloud builds submit --tag $IMAGE_NAME .
 
 # Deploy to Cloud Run
 echo -e "${BLUE}🚀 Deploying to Cloud Run...${NC}"
