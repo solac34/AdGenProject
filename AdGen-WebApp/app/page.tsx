@@ -6,6 +6,7 @@ import SegmentationChart from '../components/SegmentationChart';
 import JobTable from '../components/JobTable';
 import RunStatusPanel from '../components/RunStatusPanel';
 import RunButton from '../components/RunButton';
+import InstructionCard from '../components/InstructionCard';
 
 export default function HomePage() {
   const [isRunning, setIsRunning] = useState(false);
@@ -105,6 +106,17 @@ export default function HomePage() {
           />
         </div>
       </motion.div>
+
+      <div className="mt-10 grid grid-cols-1 md:grid-cols-3 gap-6">
+        <InstructionCard docId="masterAgentInstruction" title="Master Agent Instruction" />
+        <InstructionCard docId="dataAnalyticAgentInstruction" title="Data Analytic Agent Instruction" />
+        <InstructionCard docId="creativeAgentInstruction" title="Creative Agent Instruction" />
+      </div>
+      <div className="mt-6">
+        <a href="/segmentations" className="text-sm text-brand-blue hover:underline">
+          Go to Segmentations ›
+        </a>
+      </div>
     </div>
   );
 }
