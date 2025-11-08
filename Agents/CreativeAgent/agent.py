@@ -2,7 +2,62 @@ from google.adk.agents.llm_agent import Agent
 from google import genai
 import os
 from pathlib import Path
+from Agents.MasterAgent.firestore_helper import get_firestore_client
 
+def read_users_to_create_content():
+    """
+    Reads users to create content from firestore collection 'users_to_create_content'.
+    """
+    print(f"🔍 read_users_to_create_content çağrıldı")
+    db = get_firestore_client()
+    collection_ref = db.collection('users_to_create_content')
+    pending_users_query = (
+        collection_ref.where('state', '==', 'pending')
+        .limit(20)
+        .stream()
+    )
+    users_list = [doc.to_dict()['user_id'] for doc in pending_users_query]
+
+    return [get_user_location_and_segmentation(user_id) for user_id in users_list]
+
+def get_user_location_and_segmentation(user_id: str):
+    """
+    Retrieves the user_location from the 'users' table and the segmentation_result from the 'user_segmentations' 
+    table (collections) in Firestore for a given user_id.
+
+    Args:
+        user_id (str): The user ID to look up.
+
+    Returns:
+        dict: {
+            "user_id": user_id,
+            "user_location": ...,
+            "segmentation_result": ...
+        } or None if not found.
+    """
+    db = get_firestore_client()
+    # Get user_location from 'users' collection
+    user_doc = db.collection('users').document(user_id).get()
+    user_location = None
+    if user_doc.exists:
+        user_data = user_doc.to_dict()
+        user_location = user_data.get('location')
+    
+    # Get segmentation_result from 'user_segmentations' collection
+    segmentation_doc = db.collection('user_segmentations').document(user_id).get()
+    segmentation_result = None
+    if segmentation_doc.exists:
+        segmentation_data = segmentation_doc.to_dict()
+        segmentation_result = segmentation_data.get('segmentation_result')
+    
+    if user_location is not None or segmentation_result is not None:
+        return {
+            "user_id": user_id,
+            "user_location": user_location,
+            "segmentation_result": segmentation_result
+        }
+    else:
+        return None
 
 def create_marketing_image(
     prompt: str,
@@ -74,7 +129,7 @@ Creative agent. Creates content for the adgen project.
 """
 
 
-CREATIVE_AGENT_INSTRUCTION = """
+CREATIVE_AGENT_INSTRUCTION = f"""
 You are the Creative Agent for the AdGen project. You are responsible for creating content for the adgen project.
 
 You will be given a segmentation by master agent and you will write a detailed, engaging, creative and marketingly valuable prompt for the given segment to create content.
@@ -102,7 +157,22 @@ INSTRUCTIONS:
 2. This ad will be seen as a banner ad in the main page of the website.
 3. When user sees this ad, user must want to buy products and spend more money.
 
-
+=== YOUR WORKFLOW ===
+> WHEN MASTER AGENT TELLS YOU TO CREATE CONTENT FOR THE GIVEN SEGMENT TO WEBSITE:
+1.
+1. Use read_users_to_create_content tool to get the users to create content.
+1.1. This will return list of users with their location and segmentation result.
+{
+    "users": [
+        {
+            "user_id": "user_123",
+            "user_location": "City, USA",
+            "segmentation_result": "segmentation_result_1"
+        },
+        ...
+    ]
+}
+2. For each user, create a af
 """
 
 

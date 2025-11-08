@@ -8,7 +8,6 @@ type AgentKey = "MasterAgent" | "DataAnalyticAgent" | "CreativeAgent";
 type AgentSettings = {
   model: string;
   instructions: string;
-  runPrompt: string;
 };
 
 type SettingsStore = {
@@ -20,20 +19,17 @@ const DEFAULTS: SettingsStore = {
     MasterAgent: {
       model: "gemini-2.5-pro",
       instructions:
-        "Orchestrate sub-agents, route tasks, enforce priorities. Keep logs concise and actionable.",
-      runPrompt: "Coordinate all sub-agents and do your task."
+        "Orchestrate sub-agents, route tasks, enforce priorities. Keep logs concise and actionable."
     },
     DataAnalyticAgent: {
       model: "gemini-2.5-pro",
       instructions:
-        "Analyze user, order, and traffic data to produce segments and KPIs. Optimize for speed.",
-      runPrompt: "Segment users and compute analytics now."
+        "Analyze user, order, and traffic data to produce segments and KPIs. Optimize for speed."
     },
     CreativeAgent: {
       model: "gemini-2.5-pro",
       instructions:
-        "Generate compelling copy and assets based on latest segments. Maintain brand tone.",
-      runPrompt: "Create ad creatives for latest segments."
+        "Generate compelling copy and assets based on latest segments. Maintain brand tone."
     }
   }
 };
@@ -90,76 +86,88 @@ export default function AgentSettingsForm() {
     []
   );
 
+  const agentIcon = (key: AgentKey) => {
+    switch (key) {
+      case "MasterAgent":
+        return "🧠";
+      case "DataAnalyticAgent":
+        return "📊";
+      case "CreativeAgent":
+        return "🎨";
+      default:
+        return "🤖";
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="card-surface">
-        <div className="card-inner space-y-5">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <h2 className="text-xl font-medium">Agent Settings</h2>
-              <p className="text-sm text-zinc-400">
-                Demo-only editor. Model:{" "}
-                <span className="text-white">{active.model}</span>
-              </p>
-            </div>
-            <div className="flex items-center gap-2">
-              <select
-                value={agentKey}
-                onChange={(e) => setAgentKey(e.target.value as AgentKey)}
-                className="rounded-lg border border-brand-gray2 bg-brand-gray4 px-3 py-2 text-sm outline-none"
-              >
-                {agentOptions.map((o) => (
-                  <option key={o.value} value={o.value}>
+        <div className="card-inner">
+          {/* Agent selector centered */}
+          <div className="flex items-center justify-center">
+            <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 p-1 backdrop-blur-sm">
+              {agentOptions.map((o) => {
+                const activeTab = agentKey === o.value;
+                return (
+                  <button
+                    key={o.value}
+                    onClick={() => setAgentKey(o.value)}
+                    className={`flex items-center gap-2 rounded-full px-4 py-2 text-sm transition ${
+                      activeTab
+                        ? "bg-brand-blue text-white shadow-[0_8px_30px_rgba(0,122,204,0.35)]"
+                        : "text-zinc-300 hover:text-white hover:bg-white/10"
+                    }`}
+                  >
+                    <span className="text-base">{agentIcon(o.value as AgentKey)}</span>
                     {o.label}
-                  </option>
-                ))}
-              </select>
+                  </button>
+                );
+              })}
             </div>
           </div>
 
-          <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
-            <div className="space-y-2">
-              <label className="text-sm text-zinc-300">System Instructions</label>
-              <textarea
-                value={active.instructions}
-                onChange={(e) => setActive({ instructions: e.target.value })}
-                rows={8}
-                className="w-full resize-y rounded-xl border border-brand-gray2 bg-brand-gray4/80 p-3 text-sm outline-none focus:ring-2 focus:ring-brand-blue/50"
-              />
+          {/* Description + model */}
+          <div className="mt-6 text-center">
+            <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] text-zinc-300">
+              <span className="opacity-80">Model</span>
+              <span className="text-white">{active.model}</span>
             </div>
-            <div className="space-y-2">
-              <label className="text-sm text-zinc-300">Run Prompt</label>
-              <textarea
-                value={active.runPrompt}
-                onChange={(e) => setActive({ runPrompt: e.target.value })}
-                rows={8}
-                className="w-full resize-y rounded-xl border border-brand-gray2 bg-brand-gray4/80 p-3 text-sm outline-none focus:ring-2 focus:ring-brand-blue/50"
-              />
-            </div>
+            <p className="mt-3 text-[13px] text-zinc-300/90">
+              {agentKey === "MasterAgent" && "Orchestrates all agents and enforces priorities."}
+              {agentKey === "DataAnalyticAgent" && "Owns BigQuery/Firestore; prepares segments and KPIs."}
+              {agentKey === "CreativeAgent" && "Produces compelling creatives aligned to brand tone."}
+            </p>
           </div>
 
-          <div className="flex items-center justify-between">
-            <div className="text-xs text-zinc-400">
-              Model (read-only demo): <span className="text-white">{active.model}</span>
-            </div>
-            <div className="flex items-center gap-3">
-              <button
-                onClick={handleReset}
-                className="rounded-xl border border-white/15 bg-white/5 px-4 py-2 text-sm text-zinc-200 hover:bg-white/10"
-              >
-                Reset Demo Data
-              </button>
-              <button
-                onClick={handleSave}
-                className="rounded-xl px-4 py-2 text-sm text-white shadow-glow"
-                style={{
-                  background:
-                    "linear-gradient(180deg, rgba(0,122,204,0.9), rgba(0,122,204,0.7))"
-                }}
-              >
-                Save
-              </button>
-            </div>
+          {/* Single textarea for instructions */}
+          <div className="mt-6 space-y-2">
+            <label className="text-sm text-zinc-300">Instructions</label>
+            <textarea
+              value={active.instructions}
+              onChange={(e) => setActive({ instructions: e.target.value })}
+              rows={10}
+              className="w-full resize-y rounded-2xl border border-brand-gray2 bg-brand-gray4/80 p-4 text-sm outline-none shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] focus:ring-2 focus:ring-brand-blue/40"
+            />
+          </div>
+
+          {/* Actions */}
+          <div className="mt-5 flex items-center justify-end gap-3">
+            <button
+              onClick={handleReset}
+              className="rounded-xl border border-white/15 bg-white/5 px-4 py-2 text-sm text-zinc-200 hover:bg-white/10"
+            >
+              Reset Demo Data
+            </button>
+            <button
+              onClick={handleSave}
+              className="rounded-xl px-4 py-2 text-sm text-white shadow-glow"
+              style={{
+                background:
+                  "linear-gradient(180deg, rgba(0,122,204,0.9), rgba(0,122,204,0.7))"
+              }}
+            >
+              Save
+            </button>
           </div>
         </div>
       </div>

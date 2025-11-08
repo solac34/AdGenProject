@@ -295,12 +295,6 @@ def read_users_to_segmentate():
         }
     
     print(f"✅ {len(pending_users)} pending kullanıcı bulundu")
-    try:
-        # Also write these users to content waitlist for creative pipeline
-        write_users_to_content_waitlist(pending_users)
-        print(f"✅ {len(pending_users)} kullanıcı 'users_to_create_content' bekleme listesine yazıldı")
-    except Exception as e:
-        print(f"⚠️ users_to_create_content yazımında hata: {e}")
     
     # BigQuery'den bu kullanıcıların eventlerini ve orderlarını çek
     user_ids_str = "', '".join(pending_users)
@@ -346,35 +340,6 @@ def read_users_to_segmentate():
         "users": users_data
     }
 
-def write_users_to_content_waitlist(user_ids):
-    """
-    Kullanıcı(lar)ı 'users_to_create_content' collection'ına pending olarak yazar.
-    Tek bir user_id (str) veya user_id listesi kabul eder.
-    """
-    if isinstance(user_ids, str):
-        user_ids = [user_ids]
-    user_ids = [str(u) for u in user_ids if u]
-    if not user_ids:
-        return "No users to write to content waitlist"
-    print(f"🔍 write_users_to_content_waitlist çağrıldı: {len(user_ids)} kullanıcı")
-    db = get_firestore_client()
-    collection_ref = db.collection('users_to_create_content')
-    batch = db.batch()
-    count = 0
-    for uid in user_ids:
-        doc_ref = collection_ref.document(uid)
-        batch.set(doc_ref, {
-            'user_id': uid,
-            'state': 'pending',
-            'created_at': firestore.SERVER_TIMESTAMP
-        })
-        count += 1
-        if count % 500 == 0:
-            batch.commit()
-            batch = db.batch()
-    if count % 500 != 0:
-        batch.commit()
-    return f"{count} users added to content waitlist"
 
 def write_user_segmentation_result(user_id: str, segmentation_result: str):
     """
@@ -428,6 +393,59 @@ def write_segmentation_results_to_firestore(segmentation_results: dict):
     return f"{len(segmentation_results)} segmentation results written to firestore in single batch"
 
 
+def write_segmentation_location_pairs_to_firestore():
+    """
+    For each user in user_segmentations, fetches their segmentation_result and user_location (city, country) from users collection.
+    Writes an array of pairs (segmentation_result, city, country) to Firestore collection 'segmentation_location_pairs',
+    document 'latest'.
+    """
+    db = get_firestore_client()
+
+    # 1. Read user_segmentations collection (get all docs)
+    segmentations_ref = db.collection('user_segmentations')
+    segmentation_docs = segmentations_ref.stream()
+
+    pairs = []
+    for doc in segmentation_docs:
+        user_id = doc.id
+        segmentation_result = doc.to_dict().get('segmentation_result', None)
+        if not segmentation_result:
+            continue
+
+        # 2. Read user doc from 'users' collection
+        user_doc = db.collection('users').document(user_id).get()
+        if not user_doc.exists:
+            continue
+        user_data = user_doc.to_dict()
+        # Try to get city and country
+        city = user_data.get('city') or user_data.get('user_location') or user_data.get('main_location')
+        # Try to extract country if possible
+        country = user_data.get('country')
+        # Optionally, parse user_location if possible
+        if not country and isinstance(city, str) and ',' in city:
+            split_loc = city.split(',')
+            city = split_loc[0].strip()
+            if len(split_loc) > 1:
+                country = split_loc[1].strip()
+        # Fallbacks if missing
+        city = city if city else ''
+        country = country if country else ''
+        pairs.append({
+            "segmentation_result": segmentation_result,
+            "city": city,
+            "country": country,
+            "user_id": user_id
+        })
+
+    # Write array to Firestore
+    doc_ref = db.collection('segmentation_location_pairs').document('latest')
+    doc_ref.set({
+        "pairs": pairs,
+        "count": len(pairs),
+        "timestamp": firestore.SERVER_TIMESTAMP
+    })
+
+    return f"{len(pairs)} segmentation/location pairs written to segmentation_location_pairs/latest"
 
 
 DATA_ANALYTIC_AGENT_INSTRUCTION = """
@@ -587,6 +605,10 @@ STEP 7: return a final compact summary to the master agent. If no users, then pa
   "users": {'user_id': 'user_123', 'segmentation_result': 'segmentation_result_1', ...},
 }
 
+SIDE TASK. Write segmentation location pairs to firestore:
+1. run write_segmentation_location_pairs_to_firestore tool to write the segmentation location pairs to firestore.
+2. return confirmation: "Segmentation location pairs written to firestore"
+
 SIDE TASK. When Master Agent says: "Write user activity counts to firestore"
 
 STEP 1: Master calls retrieve_user_activity_counts()
@@ -632,9 +654,9 @@ data_analytic_agent = Agent(
         write_users_to_segmentate,
         compare_event_counts,
         read_users_to_segmentate,
-        write_users_to_content_waitlist,
         write_user_segmentation_result,
         write_segmentation_results_to_firestore,
+        write_segmentation_location_pairs_to_firestore,
     ],
 )
 
