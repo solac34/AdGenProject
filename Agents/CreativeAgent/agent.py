@@ -1,6 +1,7 @@
 from google.adk.agents.llm_agent import Agent
 from google import genai
 from google.cloud import storage
+from google.oauth2 import service_account
 import os
 from pathlib import Path
 from uuid import uuid4
@@ -19,7 +20,15 @@ def save_content_to_gcs(content: bytes, object_name: str, *, content_type: str =
     """
     
     bucket = bucket_name or os.getenv("GCS_CONTENT_BUCKET") or "ecommerce-ads-contents"
-    client = storage.Client()
+    
+    # Use service account credentials from env if available
+    creds_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS_AI")
+    if creds_path and os.path.exists(creds_path):
+        credentials = service_account.Credentials.from_service_account_file(creds_path)
+        client = storage.Client(credentials=credentials)
+    else:
+        client = storage.Client()
+    
     bucket_obj = client.bucket(bucket)
     # Ensure a subfolder path is used and uniqueness if plain name provided
     if "/" not in object_name:
@@ -60,7 +69,6 @@ def create_marketing_image(
     *,
     number_of_images: int = 1,
     aspect_ratio: str = "1:1",
-    image_size: str = "1K",
     output_dir: str = "generated",
     name: str = "segmentation_location",
 ):
@@ -71,29 +79,48 @@ def create_marketing_image(
         prompt: The generation prompt to guide the image.
         number_of_images: How many images to create (demo default 1).
         aspect_ratio: Imagen aspect ratio, e.g. \"1:1\", \"16:9\".
-        image_size: Imagen size label, e.g. \"1K\", \"2K\".
         output_dir: Directory to save images into.
 
     Returns:
         A list of saved image file paths.
     """
-    api_key = os.environ.get("GOOGLE_API_KEY")
-    if not api_key:
-        raise RuntimeError("GOOGLE_API_KEY environment variable is not set.")
-
-    client = genai.Client(api_key=api_key)
+    # Use Vertex AI (project/location) to avoid 404s on the Imagen predict route
+    project_id = (
+        os.environ.get("GOOGLE_CLOUD_PROJECT")
+        or os.environ.get("GCLOUD_PROJECT")
+        or os.environ.get("VERTEX_PROJECT")
+        or os.environ.get("PROJECT_ID")
+    )
+    location = (
+        os.environ.get("GOOGLE_CLOUD_LOCATION")
+        or os.environ.get("VERTEX_LOCATION")
+        or "us-central1"
+    )
+    if not project_id:
+        raise RuntimeError(
+            "GOOGLE_CLOUD_PROJECT (or GCLOUD_PROJECT/PROJECT_ID) is not set. "
+            "Set your GCP project for Vertex AI image generation."
+        )
+    client = genai.Client(
+        vertexai=True,
+        project=project_id,
+        location=location,
+    )
 
     result = client.models.generate_images(
-        model="models/imagen-4.0-generate-001",
+        model="publishers/google/models/imagen-4.0-generate-001",
         prompt=prompt,
         config=dict(
             number_of_images=number_of_images,
             output_mime_type="image/jpeg",
             person_generation="ALLOW_ALL",
             aspect_ratio=aspect_ratio,
-            image_size=image_size,
+            image_size="1K",
         ),
     )
+    print("================================================")
+    print(result)
+    print("================================================")
 
     if not getattr(result, "generated_images", None):
         return []
@@ -103,10 +130,8 @@ def create_marketing_image(
 
     saved_paths = []
     for n, generated_image in enumerate(result.generated_images):
-        # Convert PIL Image to bytes
-        buf = io.BytesIO()
-        generated_image.image.save(buf, format="JPEG")
-        content_bytes = buf.getvalue()
+        # Get image bytes directly from the response
+        content_bytes = generated_image.image.image_bytes
         # Save to GCS with provided name (e.g., 'segmentation_location')
         gcs_uri = save_content_to_gcs(content_bytes, f"{name}_{n}.jpg", content_type="image/jpeg")
         saved_paths.append(gcs_uri)
@@ -134,7 +159,6 @@ def create_marketing_images_batch(items: List[Dict[str, Any]]):
             prompt=prompt,
             number_of_images=item.get("number_of_images", 1),
             aspect_ratio=item.get("aspect_ratio", "1:1"),
-            image_size=item.get("image_size", "1K"),
             output_dir=item.get("output_dir", "generated"),
             name=name,
         )
