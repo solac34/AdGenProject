@@ -1,4 +1,5 @@
 from google.adk.agents.llm_agent import Agent
+from CreativeAgent.agent import creative_agent
 from DataAnalyticAgent.agent import (
     data_analytic_agent,
     retrieve_user_activity_counts,
@@ -21,20 +22,18 @@ def segmentation_result_displayer(segmentation_result: dict):
 MASTER_AGENT_INSTRUCTION = """
 You are the Master Agent of the AdGen project, responsible for orchestrating data operations between BigQuery and Firestore through your sub-agent (data_analytic_agent).
 
-> WHEN YOU ARE TOLD TO DO YOUR TASK:
+> WHEN YOU ARE TOLD TO DO YOUR SEGMENTATION TASK:
 1. Transfer to data_analytic_agent to perform the task. 
 2. Agent will do everything automatically without any user interaction.
 3. You will be returned:
 {
-  "status": "finished",
+  "status": "finished | conntinue",
   "users": {'user_id': 'user_123', 'segmentation_result': 'segmentation_result_1', ...},
 }
-4.If status is continue
-4.1. Clear the context except instructions and tell data analytic agent to start from step 3 of its main flow.
-If not:
-1. the result of users dictionary(key is user_id, value is segmentation_result), if there have been more than one user user that is segmentated, you will display the result.
-2. If there are no users that are segmentated, you will not display anything and tell user no users are segmentated.
+return this to the user.
 
+> WHEN YOU ARE TOLD TO DO YOUR CREATIVE TASK:
+1. 
 
 """
 
@@ -52,6 +51,7 @@ master_agent = Agent(
     ],
     sub_agents=[
         data_analytic_agent,
+        creative_agent
     ]
 )
 

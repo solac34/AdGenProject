@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import TopNav from '../components/TopNav';
 import SegmentationChart from '../components/SegmentationChart';
 import JobTable from '../components/JobTable';
 import RunStatusPanel from '../components/RunStatusPanel';
@@ -36,6 +37,7 @@ export default function HomePage() {
 
   return (
     <div className="mx-auto max-w-7xl p-5 sm:p-8">
+      <TopNav />
       <header className="mb-8">{headerTitle}</header>
 
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">

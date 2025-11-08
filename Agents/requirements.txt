@@ -8,3 +8,4 @@ python-dotenv>=1.0.1
 
 
 google-adk
+google-genai>=0.3.0

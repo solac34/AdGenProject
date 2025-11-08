@@ -295,6 +295,12 @@ def read_users_to_segmentate():
         }
     
     print(f"✅ {len(pending_users)} pending kullanıcı bulundu")
+    try:
+        # Also write these users to content waitlist for creative pipeline
+        write_users_to_content_waitlist(pending_users)
+        print(f"✅ {len(pending_users)} kullanıcı 'users_to_create_content' bekleme listesine yazıldı")
+    except Exception as e:
+        print(f"⚠️ users_to_create_content yazımında hata: {e}")
     
     # BigQuery'den bu kullanıcıların eventlerini ve orderlarını çek
     user_ids_str = "', '".join(pending_users)
@@ -340,6 +346,35 @@ def read_users_to_segmentate():
         "users": users_data
     }
 
+def write_users_to_content_waitlist(user_ids):
+    """
+    Kullanıcı(lar)ı 'users_to_create_content' collection'ına pending olarak yazar.
+    Tek bir user_id (str) veya user_id listesi kabul eder.
+    """
+    if isinstance(user_ids, str):
+        user_ids = [user_ids]
+    user_ids = [str(u) for u in user_ids if u]
+    if not user_ids:
+        return "No users to write to content waitlist"
+    print(f"🔍 write_users_to_content_waitlist çağrıldı: {len(user_ids)} kullanıcı")
+    db = get_firestore_client()
+    collection_ref = db.collection('users_to_create_content')
+    batch = db.batch()
+    count = 0
+    for uid in user_ids:
+        doc_ref = collection_ref.document(uid)
+        batch.set(doc_ref, {
+            'user_id': uid,
+            'state': 'pending',
+            'created_at': firestore.SERVER_TIMESTAMP
+        })
+        count += 1
+        if count % 500 == 0:
+            batch.commit()
+            batch = db.batch()
+    if count % 500 != 0:
+        batch.commit()
+    return f"{count} users added to content waitlist"
 
 def write_user_segmentation_result(user_id: str, segmentation_result: str):
     """
@@ -597,6 +632,7 @@ data_analytic_agent = Agent(
         write_users_to_segmentate,
         compare_event_counts,
         read_users_to_segmentate,
+        write_users_to_content_waitlist,
         write_user_segmentation_result,
         write_segmentation_results_to_firestore,
     ],
