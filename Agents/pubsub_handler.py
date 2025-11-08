@@ -15,6 +15,8 @@ from google.auth import default
 
 # Import the root agent
 from MasterAgent.agent import root_agent
+from importlib import reload
+import MasterAgent.agent as master_agent_module
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -90,15 +92,60 @@ class PubSubHandler:
             # Create a prompt for the MasterAgent based on the message
             prompt = self._create_agent_prompt(message_data)
             
-            # Execute the agent with the prompt
-            result = self.agent.run(prompt)
+            # Helper to normalize a status JSON if present
+            def extract_status(obj) -> str | None:
+                try:
+                    if isinstance(obj, dict) and "status" in obj:
+                        return str(obj.get("status"))
+                    if isinstance(obj, str):
+                        import json as _json
+                        j = _json.loads(obj)
+                        if isinstance(j, dict) and "status" in j:
+                            return str(j.get("status"))
+                except Exception:
+                    return None
+                return None
+
+            # Run segmentation with session rollover:
+            # - If the agent returns {"status":"continue"}, end session by recreating the agent (fresh runtime/session)
+            # - Start a new session and continue until finished or max rounds
+            rounds = 0
+            max_rounds = int(os.getenv("AGENT_SEGMENTATION_MAX_ROUNDS", "8"))
+            agent_instance = self.agent
+            last_result = None
+            statuses: list[str] = []
+
+            while True:
+                rounds += 1
+                # Execute once
+                last_result = agent_instance.run(prompt)
+                st = extract_status(last_result) or ""
+                if st:
+                    statuses.append(st)
+                logger.info(f"Agent round {rounds} status={st or 'n/a'}")
+
+                # Decide on session rollover
+                if st and st.lower() == "continue" and rounds < max_rounds:
+                    # Finish current session by reloading the agent module to ensure a brand‑new session/runtime
+                    try:
+                        reload(master_agent_module)
+                        agent_instance = master_agent_module.root_agent
+                    except Exception as _e:
+                        logger.warning(f"Failed to reload agent module for new session: {_e}")
+                        agent_instance = root_agent  # fallback
+                    # Keep prompt concise to avoid growing context
+                    prompt = "Continue the user segmentation task. Return only a minimal JSON: {\"status\": \"continue\"|\"finished\"}."
+                    continue
+                break
             
-            logger.info(f"Agent execution completed for message: {message_data.get('messageId', 'unknown')}")
+            logger.info(f"Agent execution completed for message: {message_data.get('messageId', 'unknown')} rounds={rounds}")
             
             return {
                 "status": "success",
                 "messageId": message_data.get('messageId', 'unknown'),
-                "result": result,
+                "result": last_result,
+                "rounds": rounds,
+                "statuses": statuses,
                 "processed_at": message_data.get('publishTime', 'unknown')
             }
             
