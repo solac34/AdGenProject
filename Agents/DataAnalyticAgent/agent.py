@@ -3,12 +3,10 @@ from .bq_helper import bq_to_dataframe, query_to_temp_table
 import os
 import sys
 from datetime import datetime
-import uuid
-from google.cloud import firestore
-
-# Add the parent directory to the path to allow imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-from MasterAgent.firestore_helper import get_firestore_client, get_past_events_from_firestore 
+from MasterAgent.firestore_helper import get_firestore_client, get_past_events_from_firestore
+from google.cloud import firestore
+import uuid 
 
 
 # Ortam değişkenlerini .env formatına uyarlama
@@ -21,10 +19,9 @@ if os.getenv('GOOGLE_GENAI_USE_VERTEXAI', '').lower() in ['true', '1']:
     # Lokasyon varsayılanı
     if not os.getenv('GOOGLE_CLOUD_LOCATION'):
         os.environ['GOOGLE_CLOUD_LOCATION'] = 'us-central1'
-    
-    # Cloud Run'da default service account kullan, file-based credentials kullanma
-    # GOOGLE_APPLICATION_CREDENTIALS sadece local development için gerekli
-    # Cloud Run'da bu otomatik olarak ayarlanır
+    # Vertex AI için ayrı credential belirtildiyse onu ADC olarak aktar
+    if os.getenv('GOOGLE_APPLICATION_CREDENTIALS_AI'):
+        os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = os.getenv('GOOGLE_APPLICATION_CREDENTIALS_AI', '')
 
 
 
@@ -396,6 +393,59 @@ def write_segmentation_results_to_firestore(segmentation_results: dict):
     return f"{len(segmentation_results)} segmentation results written to firestore in single batch"
 
 
+def write_segmentation_location_pairs_to_firestore():
+    """
+    For each user in user_segmentations, fetches their segmentation_result and user_location (city, country) from users collection.
+    Writes an array of pairs (segmentation_result, city, country) to Firestore collection 'segmentation_location_pairs',
+    document 'latest'.
+    """
+    db = get_firestore_client()
+
+    # 1. Read user_segmentations collection (get all docs)
+    segmentations_ref = db.collection('user_segmentations')
+    segmentation_docs = segmentations_ref.stream()
+
+    pairs = []
+    for doc in segmentation_docs:
+        user_id = doc.id
+        segmentation_result = doc.to_dict().get('segmentation_result', None)
+        if not segmentation_result:
+            continue
+
+        # 2. Read user doc from 'users' collection
+        user_doc = db.collection('users').document(user_id).get()
+        if not user_doc.exists:
+            continue
+        user_data = user_doc.to_dict()
+        # Try to get city and country
+        city = user_data.get('city') or user_data.get('user_location') or user_data.get('main_location')
+        # Try to extract country if possible
+        country = user_data.get('country')
+        # Optionally, parse user_location if possible
+        if not country and isinstance(city, str) and ',' in city:
+            split_loc = city.split(',')
+            city = split_loc[0].strip()
+            if len(split_loc) > 1:
+                country = split_loc[1].strip()
+        # Fallbacks if missing
+        city = city if city else ''
+        country = country if country else ''
+        pairs.append({
+            "segmentation_result": segmentation_result,
+            "city": city,
+            "country": country,
+            "user_id": user_id
+        })
+
+    # Write array to Firestore
+    doc_ref = db.collection('segmentation_location_pairs').document('latest')
+    doc_ref.set({
+        "pairs": pairs,
+        "count": len(pairs),
+        "timestamp": firestore.SERVER_TIMESTAMP
+    })
+
+    return f"{len(pairs)} segmentation/location pairs written to segmentation_location_pairs/latest"
 
 
 DATA_ANALYTIC_AGENT_INSTRUCTION = """
@@ -555,6 +605,10 @@ STEP 7: return a final compact summary to the master agent. If no users, then pa
   "users": {'user_id': 'user_123', 'segmentation_result': 'segmentation_result_1', ...},
 }
 
+SIDE TASK. Write segmentation location pairs to firestore:
+1. run write_segmentation_location_pairs_to_firestore tool to write the segmentation location pairs to firestore.
+2. return confirmation: "Segmentation location pairs written to firestore"
+
 SIDE TASK. When Master Agent says: "Write user activity counts to firestore"
 
 STEP 1: Master calls retrieve_user_activity_counts()
@@ -602,6 +656,7 @@ data_analytic_agent = Agent(
         read_users_to_segmentate,
         write_user_segmentation_result,
         write_segmentation_results_to_firestore,
+        write_segmentation_location_pairs_to_firestore,
     ],
 )
 
