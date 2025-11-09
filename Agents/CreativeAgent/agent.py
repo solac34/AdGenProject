@@ -390,6 +390,10 @@ INSTRUCTIONS:
 2. For each item, craft a detailed prompt and call create_marketing_image (16:9, 1K).
 3. Provide doc_id when calling create_marketing_images_batch so the generated image URL is written back to 'segmentations/<doc_id>.imageUrl'.
 
+=== FINAL RETURN (STRICT) ===
+After you finish your content creation tasks (and, if asked, updating location segmentation pairs),
+return ONLY the minimal JSON object below, with no extra prose:
+  {"status": "flow_finished"}
 """
 
 

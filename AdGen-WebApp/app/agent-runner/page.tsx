@@ -65,7 +65,9 @@ export default function AgentRunnerPage() {
             lastEvent.status === 'completed' || 
             lastEvent.status === 'error' || 
             lastEvent.status === 'finished' ||
-            lastEvent.status === 'failed'
+            lastEvent.status === 'failed' ||
+            lastEvent.status === 'segmentation_finished' ||
+            lastEvent.status === 'flow_finished'
           )) {
             console.log(`[AgentRunnerPage] Run completed with status: ${lastEvent.status}, stopping polling`);
             setIsRunning(false);

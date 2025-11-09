@@ -58,7 +58,9 @@ export default function EventFeed({ runId }: { runId: string | null }) {
           lastEvent.status === 'completed' ||
           lastEvent.status === 'error' ||
           lastEvent.status === 'finished' ||
-          lastEvent.status === 'failed'
+          lastEvent.status === 'failed' ||
+          lastEvent.status === 'segmentation_finished' ||
+          lastEvent.status === 'flow_finished'
         )) {
           console.log(`[EventFeed] Run completed with status: ${lastEvent.status}, stopping polling`);
           if (timerRef.current) {

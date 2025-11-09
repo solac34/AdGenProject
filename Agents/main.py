@@ -234,11 +234,11 @@ async def run_agent_with_rollover(prompt: str, max_rounds: int = 8, run_id: Opti
             current_prompt = (
                 'Continue the user segmentation task. '
                 'Start by calling read_users_to_segmentate. If it returns status="no_pending_users", '
-                'IMMEDIATELY return {"status":"finished"} with no further calls. '
+                'IMMEDIATELY return {"status":"segmentation_finished"} with no further calls. '
                 'Do NOT call retrieve_user_activity_counts, compare_event_counts, or write_user_activity_to_firestore. '
                 'Only process up to 5 pending users by calling write_user_segmentation_result for each. '
                 'Then decide: let remaining = pending_total - 5. '
-                'If remaining > 0 return {"status":"continue"} else return {"status":"finished"}. '
+                'If remaining > 0 return {"status":"continue"} else return {"status":"segmentation_finished"}. '
                 'Return only the minimal JSON. Do not produce any extra text.'
             )
             continue

@@ -637,12 +637,12 @@ Immediately AFTER comparing, you MUST call write_user_activity_to_firestore with
 
 STEP 3:
 Run read_users_to_segmentate tool to get the users to segmentate.
-If read_users_to_segmentate returns status="no_pending_users", IMMEDIATELY return ONLY {"status": "finished"} and STOP. Do not call any other tool or produce any extra text.
+If read_users_to_segmentate returns status="no_pending_users", IMMEDIATELY return ONLY {"status": "segmentation_finished"} and STOP. Do not call any other tool or produce any extra text.
 Important: Do NOT early-return based on pending length when there ARE users. Process up to 5 users now (the tool already limits to 5).
 After finishing all writes (STEP 5), decide final status using 'pending_total' returned from STEP 3:
   let remaining = pending_total - 5
   If remaining > 0 => return {"status": "continue"}
-  Else => return {"status": "finished"}
+  Else => return {"status": "segmentation_finished"}
 
 STEP 4: Perform segmentation on each user (AI analysis)
 STEP 4.1. Give 6 segmentations each based on 6 different criteria.
@@ -666,8 +666,8 @@ After you finish writing results for up to 5 users in this batch, immediately co
 
 
 STEP 6 (FINAL RETURN FORMAT - STRICT):
-Return ONLY a minimal JSON object. No prose, no lists, no logs. If STEP 3 returned status="no_pending_users", this MUST be {"status":"finished"}.
-  {"status": "finished"}   or   {"status": "continue"}
+Return ONLY a minimal JSON object. No prose, no lists, no logs. If STEP 3 returned status="no_pending_users", this MUST be {"status":"segmentation_finished"}.
+  {"status": "segmentation_finished"}   or   {"status": "continue"}
 
 SIDE TASK. Populate 'segmentations' collection (doc_id = segmentation_city_country):
 1. Run write_segmentation_location_pairs_to_firestore tool to upsert docs into 'segmentations'.
