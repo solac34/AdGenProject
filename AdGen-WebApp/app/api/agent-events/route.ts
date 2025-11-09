@@ -108,9 +108,18 @@ export async function GET(req: NextRequest) {
     const stream = new ReadableStream({
       start(controller) {
         const encoder = new TextEncoder();
+        let isClosed = false;
+        
         function send(evt: any) {
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify(evt)}\n\n`));
+          if (isClosed) return;
+          try {
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify(evt)}\n\n`));
+          } catch (err) {
+            console.error('[agent-events SSE] Failed to enqueue event:', err);
+            isClosed = true;
+          }
         }
+        
         // Register subscriber
         const set = subscribers.get(runId) || new Set();
         set.add(send);
@@ -120,12 +129,22 @@ export async function GET(req: NextRequest) {
         
         // Heartbeat
         const hb = setInterval(() => {
-          controller.enqueue(encoder.encode(`: ping\n\n`));
+          if (isClosed) {
+            clearInterval(hb);
+            return;
+          }
+          try {
+            controller.enqueue(encoder.encode(`: ping\n\n`));
+          } catch (err) {
+            console.error('[agent-events SSE] Heartbeat failed, closing:', err);
+            isClosed = true;
+            clearInterval(hb);
+          }
         }, 15000);
         
-        // Cleanup
-        // @ts-ignore
-        controller._onClose = () => {
+        // Cleanup function
+        const cleanup = () => {
+          isClosed = true;
           clearInterval(hb);
           const current = subscribers.get(runId);
           if (current) {
@@ -136,6 +155,9 @@ export async function GET(req: NextRequest) {
             console.log(`[agent-events SSE] Client disconnected for runId: ${runId}, remaining subscribers: ${current.size}`);
           }
         };
+        
+        // @ts-ignore
+        controller._onClose = cleanup;
       },
       cancel() {
         // @ts-ignore

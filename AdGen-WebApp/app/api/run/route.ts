@@ -20,12 +20,23 @@ export async function POST(request: Request) {
   console.log(`[run api] Max rounds: ${maxRounds}`);
 
   // Construct webhook URL for the agent service
-  const protocol = request.headers.get('x-forwarded-proto') || 'http';
-  const host = request.headers.get('host') || 'localhost:3000';
-  const webhookUrl = `${protocol}://${host}/api/agent-events`;
+  // If WEBHOOK_BASE_URL is set (e.g., ngrok URL or production URL), use it
+  // Otherwise construct from request headers (may not work for Cloud Run agents in local dev)
+  let webhookUrl: string;
+  if (process.env.WEBHOOK_BASE_URL) {
+    webhookUrl = `${process.env.WEBHOOK_BASE_URL}/api/agent-events`;
+    console.log(`[run api] Using WEBHOOK_BASE_URL from env: ${webhookUrl}`);
+  } else {
+    const protocol = request.headers.get('x-forwarded-proto') || 'http';
+    const host = request.headers.get('host') || 'localhost:3000';
+    webhookUrl = `${protocol}://${host}/api/agent-events`;
+    console.log(`[run api] ⚠️  Using webhook URL from headers: ${webhookUrl}`);
+    if (host.includes('localhost')) {
+      console.log(`[run api] ⚠️  WARNING: localhost webhook URL will NOT work with Cloud Run agents!`);
+      console.log(`[run api] 💡 Set WEBHOOK_BASE_URL env var (e.g., ngrok URL) for local testing with Cloud Run`);
+    }
+  }
   const webhookSecret = process.env.WEBHOOK_SECRET || 'dev-secret-123';
-
-  console.log(`[run api] Webhook URL: ${webhookUrl}`);
 
   try {
     const res = await fetch(agentsUrl, {
