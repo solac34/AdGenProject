@@ -11,7 +11,25 @@ from datetime import datetime
 import io
 from typing import List, Dict, Any
 from MasterAgent.firestore_helper import get_firestore_client
+from webhook import report_progress
+import uuid as _uuid
 
+
+def _run_id() -> str:
+    return os.getenv("AGENTS_CURRENT_RUN_ID") or f"local-{_uuid.uuid4().hex[:6]}"
+
+def _progress(status: str, message: str, *, step: str | None = None, meta: dict | None = None) -> None:
+    try:
+        report_progress(
+            run_id=_run_id(),
+            agent="CreativeAgent",
+            status=status,
+            message=message,
+            step=step,
+            meta=meta,
+        )
+    except Exception:
+        pass
 
 def save_content_to_gcs(content: bytes, object_name: str, *, content_type: str = "application/octet-stream", bucket_name: str | None = None) -> str:
     """
@@ -102,6 +120,7 @@ def read_segmentations_to_generate(limit: int = 50):
     def normalize(s: str) -> str:
         return str(s).strip().replace("/", "_").replace("\\", "_").replace(",", "").replace(" ", "_")
 
+    _progress("progress", "Starting read_segmentations_to_generate", step="read_segmentations_to_generate", meta={"limit": limit})
     print(f"🗂️  [Creative] read_segmentations_to_generate(limit={limit})")
     db = get_firestore_client()
     col = db.collection('segmentations')
@@ -127,6 +146,7 @@ def read_segmentations_to_generate(limit: int = 50):
         name = f"{normalize(seg_name)}_{normalize(city)}_{normalize(country)}"
         items.append({"segmentation_name": seg_name, "city": city, "country": country, "doc_id": doc_id, "name": name})
     print(f"📊 [Creative] found {len(items)} items to generate, skipped_no_fields={skipped_no_fields}, skipped_has_image={skipped_has_image}")
+    _progress("success", "Finished read_segmentations_to_generate", step="read_segmentations_to_generate", meta={"to_generate": len(items), "skipped_no_fields": skipped_no_fields, "skipped_has_image": skipped_has_image})
     return items
 
 
@@ -153,6 +173,7 @@ def create_marketing_image(
     Returns:
         A list of saved image file paths.
     """
+    _progress("progress", "Starting create_marketing_image", step="create_marketing_image", meta={"aspect_ratio": aspect_ratio, "number_of_images": number_of_images, "name": name, "segmentation_name": segmentation_name, "city": city, "country": country})
     print(f"🎨 [Creative] create_marketing_image called: aspect_ratio={aspect_ratio}, num_images={number_of_images}, name={name}")
     # If caller didn't provide object_name, build nested folder path from segmentation_name/city/country
     computed_prefix = ""
@@ -237,6 +258,7 @@ def create_marketing_image(
         saved_paths.append(gcs_uri)
     print(f"✅ [Creative] saved {len(saved_paths)} images → {saved_paths[:2]}{'...' if len(saved_paths)>2 else ''}")
 
+    _progress("success", "Finished create_marketing_image", step="create_marketing_image", meta={"saved": len(saved_paths), "first_uri": (saved_paths[0] if saved_paths else None)})
     return saved_paths
 
 
@@ -259,6 +281,7 @@ def create_marketing_images_batch(items: List[Dict[str, Any]]):
             .replace(" ", "_")
         )
 
+    _progress("progress", "Starting create_marketing_images_batch", step="create_marketing_images_batch", meta={"items": len(items or [])})
     print(f"🧺 [Creative] create_marketing_images_batch: items={len(items or [])}")
     results = []
     for item in items or []:
@@ -316,6 +339,7 @@ def create_marketing_images_batch(items: List[Dict[str, Any]]):
             continue
         results.append({"name": name, "uris": uris})
     print(f"🏁 [Creative] batch generation done, {len(results)} items processed")
+    _progress("success", "Finished create_marketing_images_batch", step="create_marketing_images_batch", meta={"processed": len(results)})
     return results
 
 

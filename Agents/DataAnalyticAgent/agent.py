@@ -8,6 +8,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from MasterAgent.firestore_helper import get_firestore_client, get_past_events_from_firestore
 from google.cloud import firestore
 import uuid 
+from webhook import report_progress
 
 
 # Ortam değişkenlerini .env formatına uyarlama
@@ -24,6 +25,22 @@ if os.getenv('GOOGLE_GENAI_USE_VERTEXAI', '').lower() in ['true', '1']:
     if os.getenv('GOOGLE_APPLICATION_CREDENTIALS_AI'):
         os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = os.getenv('GOOGLE_APPLICATION_CREDENTIALS_AI', '')
 
+
+def _run_id() -> str:
+    return os.getenv("AGENTS_CURRENT_RUN_ID") or f"local-{uuid.uuid4().hex[:6]}"
+
+def _progress(status: str, message: str, *, step: str | None = None, meta: dict | None = None) -> None:
+    try:
+        report_progress(
+            run_id=_run_id(),
+            agent="DataAnalyticAgent",
+            status=status,
+            message=message,
+            step=step,
+            meta=meta,
+        )
+    except Exception:
+        pass
 
 
 
@@ -42,6 +59,7 @@ def retrieve_user_activity_counts():
             }
         }
     """
+    _progress("progress", "Starting retrieve_user_activity_counts", step="retrieve_user_activity_counts")
     print(f"🔍 retrieve_user_activity_counts çağrıldı")
     
     # 1. Event counts query
@@ -86,6 +104,15 @@ def retrieve_user_activity_counts():
     print(f"✅ retrieve_user_activity_counts RESULT:")
     print(f"   Status: {result.get('status')}")
     print(f"   Data Reference: {result.get('data_reference')}")
+    try:
+        _progress(
+            "success",
+            "Finished retrieve_user_activity_counts",
+            step="retrieve_user_activity_counts",
+            meta={"data_reference": result.get("data_reference")},
+        )
+    except Exception:
+        pass
     
     return result
 
@@ -93,6 +120,7 @@ def retrieve_user_activity_counts():
 
 def write_user_activity_to_firestore(data_reference: dict):
 
+    _progress("progress", "Starting write_user_activity_to_firestore", step="write_user_activity_to_firestore", meta={"data_reference": data_reference})
     print(f"🔍 write_user_activity_to_firestore çağrıldı")
     print(f"📥 Gelen data_reference: {data_reference}")
     
@@ -147,7 +175,9 @@ def write_user_activity_to_firestore(data_reference: dict):
     print(f"✅ Firestore'a yazıldı: user_activity_counts/{doc_id}")
     print(f"   Örnek veri: {list(user_activity.items())[:2]}")
 
-    return f"{len(user_activity)} user activity records written to firestore as document: {doc_id}"
+    msg = f"{len(user_activity)} user activity records written to firestore as document: {doc_id}"
+    _progress("success", "Finished write_user_activity_to_firestore", step="write_user_activity_to_firestore", meta={"total_users": len(user_activity), "doc_id": doc_id})
+    return msg
 
 
 
@@ -155,6 +185,7 @@ def write_users_to_segmentate(user_ids: list):
     """
     'users_to_segmentate' collection'ına users'ı tek tek (state=pending) yazar.
     """
+    _progress("progress", "Starting write_users_to_segmentate", step="write_users_to_segmentate", meta={"count": len(user_ids or [])})
     print(f"🔍 write_users_to_segmentate çağrıldı")
     print(f"📥 {len(user_ids)} kullanıcı yazılacak")
     
@@ -186,6 +217,7 @@ def write_users_to_segmentate(user_ids: list):
         batch.commit()
     
     print(f"✅ Toplam {count} kullanıcı 'users_to_segmentate' collection'ına yazıldı (state: pending)")
+    _progress("success", "Finished write_users_to_segmentate", step="write_users_to_segmentate", meta={"written": count})
     return f"{count} users written to Firestore collection 'users_to_segmentate' with state: pending"
 
 
@@ -200,6 +232,7 @@ def compare_event_counts(data_reference: dict):
     Returns:
         dict: {status, data_reference, users_to_segment_count, written_to_firestore}
     """
+    _progress("progress", "Starting compare_event_counts", step="compare_event_counts", meta={"data_reference": data_reference})
     project = data_reference.get('project')
     dataset = data_reference.get('dataset')
     table = data_reference.get('table')
@@ -248,6 +281,7 @@ def compare_event_counts(data_reference: dict):
     else:
         print("ℹ️ Segmentlenecek yeni kullanıcı bulunamadı")
     
+    _progress("success", "Finished compare_event_counts", step="compare_event_counts", meta={"users_to_segment_count": len(new_or_increased_users)})
     return {
         "status": "success",
         "data_reference": data_reference,
@@ -275,6 +309,7 @@ def read_users_to_segmentate():
             ]
         }
     """
+    _progress("progress", "Starting read_users_to_segmentate", step="read_users_to_segmentate")
     print(f"🔍 read_users_to_segmentate çağrıldı")
     
     # Firestore'dan pending kullanıcıları al
@@ -302,6 +337,7 @@ def read_users_to_segmentate():
     
     if not pending_users:
         print("⚠️ Pending durumunda kullanıcı bulunamadı")
+        _progress("success", "Finished read_users_to_segmentate (no_pending_users)", step="read_users_to_segmentate", meta={"pending_total": pending_total})
         return {
             "status": "no_pending_users",
             "users": [],
@@ -349,6 +385,7 @@ def read_users_to_segmentate():
     
     print(f"✅ {len(users_data)} kullanıcının verileri hazırlandı")
     
+    _progress("success", "Finished read_users_to_segmentate", step="read_users_to_segmentate", meta={"users_fetched": len(users_data), "pending_total": pending_total})
     return {
         "status": "success",
         "users": users_data,
@@ -368,6 +405,7 @@ def write_user_segmentation_result(user_id: str, segmentation_result: str):
     Returns:
         str: Confirmation message
     """
+    _progress("progress", "Starting write_user_segmentation_result", step="write_user_segmentation_result", meta={"user_id": user_id})
     print(f"🔍 write_user_segmentation_result çağrıldı: {user_id}")
     
     db = get_firestore_client()
@@ -388,6 +426,7 @@ def write_user_segmentation_result(user_id: str, segmentation_result: str):
     # Throttle to avoid LLM QPS/RPM limits between tool calls
     time.sleep(2.0)
     
+    _progress("success", "Finished write_user_segmentation_result", step="write_user_segmentation_result", meta={"user_id": user_id})
     return "success"
 
 
@@ -396,6 +435,7 @@ def write_segmentation_results_to_firestore(segmentation_results: dict):
     Segmentation sonuçlarını Firestore'a batch olarak yazar.
     Tüm dict tek seferde 'segmentation_results' dokümanına kaydedilir.
     """
+    _progress("progress", "Starting write_segmentation_results_to_firestore", step="write_segmentation_results_to_firestore", meta={"count": len(segmentation_results or {})})
     db = get_firestore_client()
     # Tüm segmentation results'ı tek bir dokümana yaz
     doc_ref = db.collection('segmentation_results').document('latest_batch')
@@ -404,6 +444,7 @@ def write_segmentation_results_to_firestore(segmentation_results: dict):
         'count': len(segmentation_results),
         'timestamp': firestore.SERVER_TIMESTAMP
     })
+    _progress("success", "Finished write_segmentation_results_to_firestore", step="write_segmentation_results_to_firestore", meta={"count": len(segmentation_results or {})})
     return f"{len(segmentation_results)} segmentation results written to firestore in single batch"
 
 
@@ -419,6 +460,7 @@ def write_segmentation_location_pairs_to_firestore():
         imageUrl: "" (ONLY when creating a new document)
         updated_at: server timestamp
     """
+    _progress("progress", "Starting write_segmentation_location_pairs_to_firestore", step="write_segmentation_location_pairs_to_firestore")
     db = get_firestore_client()
 
     # 1. Read user_segmentations collection (get all docs)
@@ -472,6 +514,7 @@ def write_segmentation_location_pairs_to_firestore():
             seg_doc_ref.set(base_payload, merge=True)
         written += 1
 
+    _progress("success", "Finished write_segmentation_location_pairs_to_firestore", step="write_segmentation_location_pairs_to_firestore", meta={"written": written})
     return f"{written} segmentation documents upserted into 'segmentations' with underscore IDs"
 
 

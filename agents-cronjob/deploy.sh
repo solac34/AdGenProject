@@ -30,8 +30,39 @@ gcloud run deploy "${SERVICE_NAME}" \
   --region "${REGION}" \
   --allow-unauthenticated \
 
-
 echo "Deployed ${SERVICE_NAME} to ${REGION} in project ${PROJECT_ID}"
-echo "Remember to create a Cloud Scheduler job to invoke this service on your desired schedule."
+echo "Configuring Cloud Scheduler to invoke this service hourly..."
+
+# Resolve the deployed Cloud Run service URL
+SERVICE_URL="$(gcloud run services describe "${SERVICE_NAME}" --region "${REGION}" --format='value(status.url)')"
+if [[ -z "${SERVICE_URL}" ]]; then
+  echo "Failed to resolve Cloud Run service URL for ${SERVICE_NAME}"
+  exit 1
+fi
+
+# Scheduler settings (hourly)
+SCHEDULE="0 * * * *" # every hour at minute 0
+SCHEDULER_JOB_NAME="${SERVICE_NAME}-hourly"
+# Service account used by Cloud Scheduler for OIDC auth; override with SCHEDULER_SERVICE_ACCOUNT if needed
+SCHEDULER_SA="${SCHEDULER_SERVICE_ACCOUNT:-${PROJECT_ID}@appspot.gserviceaccount.com}"
+
+# Create or update the scheduler job
+if gcloud scheduler jobs describe "${SCHEDULER_JOB_NAME}" --location "${REGION}" >/dev/null 2>&1; then
+  gcloud scheduler jobs update http "${SCHEDULER_JOB_NAME}" \
+    --location "${REGION}" \
+    --schedule "${SCHEDULE}" \
+    --uri "${SERVICE_URL}" \
+    --http-method POST \
+    --oidc-service-account-email "${SCHEDULER_SA}"
+  echo "Updated Cloud Scheduler job '${SCHEDULER_JOB_NAME}' (${SCHEDULE}) -> ${SERVICE_URL}"
+else
+  gcloud scheduler jobs create http "${SCHEDULER_JOB_NAME}" \
+    --location "${REGION}" \
+    --schedule "${SCHEDULE}" \
+    --uri "${SERVICE_URL}" \
+    --http-method POST \
+    --oidc-service-account-email "${SCHEDULER_SA}"
+  echo "Created Cloud Scheduler job '${SCHEDULER_JOB_NAME}' (${SCHEDULE}) -> ${SERVICE_URL}"
+fi
 
 

@@ -131,6 +131,8 @@ async def run_agent_with_rollover(prompt: str, max_rounds: int = 8, run_id: Opti
     current_prompt = prompt
     statuses = []
     last_result = None
+    # Propagate run id to tools via environment so they can report progress
+    os.environ["AGENTS_CURRENT_RUN_ID"] = run_id
 
     while True:
         rounds += 1
