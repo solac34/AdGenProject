@@ -132,7 +132,6 @@ def read_segmentations_to_generate(limit: int = 50):
 
 def create_marketing_image(
     prompt: str,
-    *,
     number_of_images: int = 1,
     aspect_ratio: str = "16:9",
     output_dir: str = "generated",
