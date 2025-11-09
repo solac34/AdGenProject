@@ -1,4 +1,5 @@
 from google.adk.agents.llm_agent import Agent
+import time
 from .bq_helper import bq_to_dataframe, query_to_temp_table
 import os
 import sys
@@ -384,6 +385,8 @@ def write_user_segmentation_result(user_id: str, segmentation_result: str):
     pending_doc_ref.delete()
     
     print(f"✅ Kullanıcı {user_id} segmentasyonu tamamlandı (state: success)")
+    # Throttle to avoid LLM QPS/RPM limits between tool calls
+    time.sleep(2.0)
     
     return "success"
 
@@ -591,10 +594,10 @@ Immediately AFTER comparing, you MUST call write_user_activity_to_firestore with
 
 STEP 3:
 Run read_users_to_segmentate tool to get the users to segmentate.
-If there are no users to segmentate, return to the master agent and report that no users were segmented.
-Important: Do NOT early-return based on pending length. Process up to 20 users now.
+If read_users_to_segmentate returns status="no_pending_users", IMMEDIATELY return ONLY {"status": "finished"} and STOP. Do not call any other tool or produce any extra text.
+Important: Do NOT early-return based on pending length when there ARE users. Process up to 5 users now (the tool already limits to 5).
 After finishing all writes (STEP 5), decide final status using 'pending_total' returned from STEP 3:
-  let remaining = pending_total - 20
+  let remaining = pending_total - 5
   If remaining > 0 => return {"status": "continue"}
   Else => return {"status": "finished"}
 
@@ -616,10 +619,11 @@ STEP 5: For each user, call write_user_segmentation_result(user_id, result)
   1. Write result to 'user_segmentations' collection
   2. Mark user as 'success' in 'users_to_segmentate'
   3. Return confirmation
+After you finish writing results for up to 5 users in this batch, immediately compute the final status (using pending_total from STEP 3) and STOP. Do not produce extra prose or make additional calls; proceed directly to STEP 6.
 
 
 STEP 6 (FINAL RETURN FORMAT - STRICT):
-Return ONLY a minimal JSON object. No prose, no lists, no logs:
+Return ONLY a minimal JSON object. No prose, no lists, no logs. If STEP 3 returned status="no_pending_users", this MUST be {"status":"finished"}.
   {"status": "finished"}   or   {"status": "continue"}
 
 SIDE TASK. Populate 'segmentations' collection (doc_id = segmentation_city_country):
