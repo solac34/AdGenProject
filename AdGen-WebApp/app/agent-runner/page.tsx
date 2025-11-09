@@ -35,7 +35,7 @@ export default function AgentRunnerPage() {
     eventsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [events]);
 
-  // Poll for events when running
+  // Live events via SSE + polling fallback
   useEffect(() => {
     if (!runId || !isRunning) {
       startTimeRef.current = null;
@@ -44,6 +44,44 @@ export default function AgentRunnerPage() {
 
     // Set start time for timeout mechanism
     startTimeRef.current = Date.now();
+
+    // SSE stream
+    let es: EventSource | null = null;
+    try {
+      es = new EventSource(`/api/agent-events?runId=${encodeURIComponent(runId)}&sse=1`);
+      es.onmessage = (evt) => {
+        try {
+          const parsed = JSON.parse(evt.data || '{}') as Partial<AgentEvent> & { id?: string };
+          const id = parsed.id || `${parsed.timestamp}-${Math.random().toString(36).slice(2,7)}`;
+          setEvents((prev) => {
+            if (prev.some((e) => e.id === id)) return prev;
+            const next = [...prev, { 
+              id,
+              agent: parsed.agent || 'unknown',
+              status: parsed.status || 'info',
+              message: parsed.message || '',
+              step: parsed.step ?? null,
+              timestamp: Number(parsed.timestamp || Date.now()),
+              receivedAt: Date.now(),
+            }];
+            // Stop if terminal status received
+            const last = next[next.length - 1];
+            const term = ['completed','finished','failed','error','segmentation_finished','flow_finished'];
+            if (last && term.includes((last.status || '').toLowerCase())) {
+              setIsRunning(false);
+            }
+            return next.slice(-500);
+          });
+        } catch {
+          // ignore malformed
+        }
+      };
+      es.onerror = () => {
+        try { es?.close(); } catch {}
+      };
+    } catch {
+      // ignore
+    }
 
     const pollEvents = async () => {
       try {
@@ -85,6 +123,7 @@ export default function AgentRunnerPage() {
     return () => {
       clearInterval(interval);
       startTimeRef.current = null;
+      try { es?.close(); } catch {}
     };
   }, [runId, isRunning]);
 

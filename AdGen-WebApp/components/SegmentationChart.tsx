@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
 
 // Suppress YAxis defaultProps warning by providing all required props
@@ -14,20 +14,44 @@ const CustomYAxis = (props: any) => (
   />
 );
 
+type ChartRow = { run: string; users: number };
+
 export default function SegmentationChart() {
-  const data = useMemo(
-    () =>
-      Array.from({ length: 12 }).map((_, i) => ({
-        run: `#${i + 1}`,
-        users: Math.round(50 + Math.random() * 450)
-      })),
-    []
-  );
+  const [rows, setRows] = useState<ChartRow[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const res = await fetch('/api/segmentations?limit=12', { cache: 'no-store' });
+        const data = await res.json();
+        const items = Array.isArray(data.items) ? data.items : [];
+        const formatted: ChartRow[] = items.map((it: any, idx: number) => ({
+          run: it.label || `#${idx + 1}`,
+          users: Number(it.total_users || 0),
+        }));
+        if (!cancelled) setRows(formatted);
+      } catch {
+        // Fallback demo data if API not available
+        if (!cancelled) {
+          const demo = Array.from({ length: 12 }).map((_, i) => ({
+            run: `#${i + 1}`,
+            users: Math.round(50 + Math.random() * 450),
+          }));
+          setRows(demo);
+        }
+      }
+    };
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   return (
     <div className="h-[380px]">
       <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={data} margin={{ top: 10, right: 20, left: -20, bottom: 0 }}>
+        <BarChart data={rows} margin={{ top: 10, right: 20, left: -20, bottom: 0 }}>
           <CartesianGrid stroke="rgba(255,255,255,0.06)" vertical={false} />
           <XAxis 
             dataKey="run" 

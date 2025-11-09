@@ -11,6 +11,20 @@ type AgentEvent = {
   timestamp?: number;
 };
 
+// Simple in-memory SSE broker (per server instance)
+const subscribers: Map<string, Set<(evt: any) => void>> = new Map();
+function publish(runId: string, evt: any) {
+  const set = subscribers.get(runId);
+  if (!set) return;
+  for (const send of set) {
+    try {
+      send(evt);
+    } catch {
+      // ignore
+    }
+  }
+}
+
 export async function POST(req: NextRequest) {
   const secretHeader = req.headers.get('x-webhook-secret');
   const sharedSecret = process.env.WEBHOOK_SECRET;
@@ -48,6 +62,8 @@ export async function POST(req: NextRequest) {
       .doc(runId)
       .collection('events')
       .add(eventDoc);
+    // Broadcast to SSE listeners
+    publish(runId, { id: `${eventDoc.timestamp}-${Math.random().toString(36).slice(2,7)}`, ...eventDoc });
     return Response.json({ ok: true });
   } catch (e) {
     // eslint-disable-next-line no-console
@@ -55,6 +71,8 @@ export async function POST(req: NextRequest) {
     
     // Always return success to allow webhooks to work (both dev and prod)
     console.warn(`[agent-events POST] Firestore error, simulating success for ${runId}`);
+    // Still broadcast so UI updates in dev
+    publish(runId, { id: `${eventDoc.timestamp}-${Math.random().toString(36).slice(2,7)}`, ...eventDoc, _firestoreError: true });
     return Response.json({ ok: true, _firestoreError: true });
   }
 }
@@ -63,10 +81,53 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const runId = searchParams.get('runId');
   const limitParam = searchParams.get('limit');
+  const sse = searchParams.get('sse') === '1';
   const limitNum = Math.min(Math.max(parseInt(limitParam || '100', 10) || 100, 1), 500);
 
   if (!runId) {
     return new Response(JSON.stringify({ error: 'missing_runId' }), { status: 400 });
+  }
+
+  // Server-Sent Events stream for live updates
+  if (sse) {
+    const stream = new ReadableStream({
+      start(controller) {
+        const encoder = new TextEncoder();
+        function send(evt: any) {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(evt)}\n\n`));
+        }
+        // Register subscriber
+        const set = subscribers.get(runId) || new Set();
+        set.add(send);
+        subscribers.set(runId, set);
+        // Heartbeat
+        const hb = setInterval(() => {
+          controller.enqueue(encoder.encode(`: ping\n\n`));
+        }, 15000);
+        // Cleanup
+        // @ts-ignore
+        controller._onClose = () => {
+          clearInterval(hb);
+          const current = subscribers.get(runId);
+          if (current) {
+            current.delete(send);
+            if (current.size === 0) subscribers.delete(runId);
+          }
+        };
+      },
+      cancel() {
+        // @ts-ignore
+        if (typeof (this as any)._onClose === 'function') (this as any)._onClose();
+      }
+    });
+    return new Response(stream, {
+      headers: {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache, no-transform',
+        Connection: 'keep-alive',
+        'X-Accel-Buffering': 'no',
+      },
+    });
   }
 
   try {

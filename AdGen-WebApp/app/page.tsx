@@ -81,48 +81,7 @@ export default function HomePage() {
         </motion.aside>
       </div>
 
-      <motion.div
-        initial={{ opacity: 0, y: 12 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4 }}
-        className="mt-4 flex items-center justify-center"
-      >
-        <div className="relative">
-          <div className="pointer-events-none absolute -inset-x-16 -top-10 z-[-1] h-24 rounded-full bg-brand-blue/30 blur-3xl" />
-          <RunButton
-            size="lg"
-            isRunning={isRunning}
-            onClick={async () => {
-              if (isRunning) return;
-              setIsRunning(true);
-              try {
-                console.log('🚀 Starting agent run...');
-                const res = await fetch('/api/run', { method: 'POST' });
-                const data = (await res.json()) as { 
-                  runId: string; 
-                  forwarded?: boolean; 
-                  error?: string;
-                  agentsUrl?: string;
-                };
-                
-                console.log('📊 Agent run response:', data);
-                console.log('🆔 Setting runId:', data.runId);
-                setRunId(data.runId);
-                
-                if (!data.forwarded) {
-                  console.warn('⚠️ Request not forwarded to agents service:', data.error || 'Unknown reason');
-                } else {
-                  console.log('✅ Agent run initiated successfully');
-                  console.log('🔄 EventFeed should start polling for runId:', data.runId);
-                }
-              } catch (error) {
-                console.error('❌ Failed to start agent run:', error);
-                setRunId(`error-${Date.now()}`);
-              }
-            }}
-          />
-        </div>
-      </motion.div>
+      {/* Run button removed from home per request; use Agent Runner page instead */}
 
       <div className="mt-10 grid grid-cols-1 md:grid-cols-3 gap-6">
         <InstructionCard docId="masterAgentInstruction" title="Master Agent Instruction" />

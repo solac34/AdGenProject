@@ -29,6 +29,31 @@ export default function EventFeed({ runId }: { runId: string | null }) {
     // Set start time for timeout mechanism
     startTimeRef.current = Date.now();
 
+    // Try Server-Sent Events first for real-time updates; fall back to polling
+    let es: EventSource | null = null;
+    try {
+      es = new EventSource(`/api/agent-events?runId=${encodeURIComponent(runId)}&sse=1`);
+      es.onmessage = (evt) => {
+        try {
+          const parsed = JSON.parse(evt.data || '{}') as FeedEvent & { id?: string };
+          const id = parsed.id || `${parsed.timestamp}-${Math.random().toString(36).slice(2,7)}`;
+          setEvents((prev) => {
+            if (prev.some((e) => e.id === id)) return prev;
+            const next = [...prev, { ...parsed, id }];
+            return next.slice(-500);
+          });
+        } catch {
+          // ignore malformed
+        }
+      };
+      es.onerror = () => {
+        // Close and allow polling to handle updates
+        try { es?.close(); } catch {}
+      };
+    } catch {
+      // ignore if EventSource not available
+    }
+
     const fetchOnce = async () => {
       try {
         setLoading(true);
@@ -76,14 +101,15 @@ export default function EventFeed({ runId }: { runId: string | null }) {
       }
     };
 
-    // initial + poll
+    // initial + poll (kept as fallback alongside SSE)
     fetchOnce();
     if (timerRef.current) window.clearInterval(timerRef.current);
-    timerRef.current = window.setInterval(fetchOnce, 1500);
+    timerRef.current = window.setInterval(fetchOnce, 2000);
     return () => {
       if (timerRef.current) window.clearInterval(timerRef.current);
       timerRef.current = null;
       startTimeRef.current = null;
+      try { es?.close(); } catch {}
     };
   }, [runId]);
 
