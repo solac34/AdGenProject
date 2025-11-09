@@ -1,4 +1,4 @@
-import { NextRequest } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { spawn } from 'child_process';
 
 export const runtime = 'nodejs';
@@ -15,10 +15,30 @@ export async function POST(req: NextRequest) {
       otherShare
     } = body || {};
 
-    // Path to the script
-    const cwd = process.cwd().replace(/AdGen-WebApp.*/,'AdGenProject/adg-ecommerce');
+    // If an external ecommerce service is configured, forward the request there
+    const ecomUrl = (process.env.ECOMMERCE_SERVICE_URL || '').trim();
+    if (ecomUrl) {
+      const url = `${ecomUrl.replace(/\/+$/,'')}/api/seedmega`;
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          totalUsers,
+          orderChance,
+          anonCount,
+          usShare,
+          euShare,
+          otherShare
+        }),
+      });
+      const data = await resp.json();
+      return NextResponse.json(data, { status: 200 });
+    }
+
+    // Fallback for monorepo local dev: spawn the script from adg-ecommerce
+    const monorepoCwd = process.cwd().replace(/AdGen-WebApp.*/,'AdGenProject/adg-ecommerce');
     const child = spawn('node', ['scripts/seedMega.js'], {
-      cwd,
+      cwd: monorepoCwd,
       env: {
         ...process.env,
         SEED_TOTAL_USERS: String(totalUsers ?? ''),
