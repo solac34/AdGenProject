@@ -1,7 +1,7 @@
 import { Firestore } from "@google-cloud/firestore";
 
 const PROJECT_ID = process.env.GCP_PROJECT_ID || process.env.GOOGLE_CLOUD_PROJECT || "eighth-upgrade-475017-u5";
-const DATABASE_ID = process.env.FIRESTORE_DB_ID || "(default)";
+const DATABASE_ID = process.env.FIRESTORE_DB_ID || "adgen-db";
 const KEYFILE = process.env.GOOGLE_APPLICATION_CREDENTIALS || process.env.BQ_KEYFILE;
 const SA_JSON = process.env.GCP_SERVICE_ACCOUNT_JSON;
 const FORCE_MOCK = (process.env.FORCE_FIRESTORE_MOCK || "").trim() === "1";

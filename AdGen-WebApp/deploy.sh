@@ -90,7 +90,8 @@ gcloud run deploy $SERVICE_NAME \
     --cpu 1 \
     --timeout 300 \
     --concurrency 100 \
-    --max-instances 10 \
+    --min-instances 1 \
+    --max-instances 1 \
     --set-env-vars "NODE_ENV=production,GOOGLE_CLOUD_PROJECT=${PROJECT_ID},FIRESTORE_DB_ID=adgen-db,WEBHOOK_SECRET=${WEBHOOK_SECRET},AGENTS_SERVICE_URL=${AGENTS_SERVICE_URL},AGENTS_API_TOKEN=${AGENTS_API_TOKEN},ECOMMERCE_SERVICE_URL=${ECOMMERCE_SERVICE_URL}"
 
 # Get the service URL

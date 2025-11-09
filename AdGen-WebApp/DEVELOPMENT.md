@@ -50,7 +50,7 @@ Create a `.env.local` file:
 ```env
 GOOGLE_CLOUD_PROJECT=eighth-upgrade-475017-u5
 GCP_PROJECT_ID=eighth-upgrade-475017-u5
-FIRESTORE_DB_ID=(default)
+FIRESTORE_DB_ID=adgen-db
 GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account-key.json
 ```
 
@@ -58,9 +58,15 @@ GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account-key.json
 
 ### Required for Production
 - `GOOGLE_CLOUD_PROJECT`: Google Cloud project ID
-- `WEBHOOK_SECRET`: Secret for webhook authentication
+- `WEBHOOK_SECRET`: Secret for webhook authentication (must match agents service)
 - `AGENTS_SERVICE_URL`: URL of the agents service
 - `AGENTS_API_TOKEN`: API token for agents service
+
+### Webhook Configuration
+For real-time agent events, set these environment variables:
+- `WEBHOOK_SECRET`: Shared secret between webapp and agents (default: "your-webhook-secret-here")
+
+The agents will automatically send events to: `https://your-webapp-url/api/agent-events`
 
 ### Optional for Development
 - `GOOGLE_APPLICATION_CREDENTIALS`: Path to service account key file

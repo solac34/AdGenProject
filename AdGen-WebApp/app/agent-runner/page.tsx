@@ -37,95 +37,93 @@ export default function AgentRunnerPage() {
     eventsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [events]);
 
-  // Live events via SSE + polling fallback
+  // Polling for agent events (works with Cloud Run)
   useEffect(() => {
     if (!runId || !isRunning) {
       startTimeRef.current = null;
       return;
     }
 
+    console.log(`[AgentRunnerPage] Setting up polling for runId: ${runId}`);
+
     // Set start time for timeout mechanism
     startTimeRef.current = Date.now();
 
-    // SSE stream
-    let es: EventSource | null = null;
-    try {
-      es = new EventSource(`/api/agent-events?runId=${encodeURIComponent(runId)}&sse=1`);
-      es.onmessage = (evt) => {
-        try {
-          const parsed = JSON.parse(evt.data || '{}') as Partial<AgentEvent> & { id?: string };
-          const id = parsed.id || `${parsed.timestamp}-${Math.random().toString(36).slice(2,7)}`;
-          setEvents((prev) => {
-            if (prev.some((e) => e.id === id)) return prev;
-            const next = [...prev, { 
-              id,
-              agent: parsed.agent || 'unknown',
-              status: parsed.status || 'info',
-              message: parsed.message || '',
-              step: parsed.step ?? null,
-              timestamp: Number(parsed.timestamp || Date.now()),
-              receivedAt: Date.now(),
-            }];
-            // Stop if terminal status received
-            const last = next[next.length - 1];
-            const term = ['completed','finished','failed','error','segmentation_finished','flow_finished'];
-            if (last && term.includes((last.status || '').toLowerCase())) {
-              setIsRunning(false);
-            }
-            return next.slice(-500);
-          });
-        } catch {
-          // ignore malformed
-        }
-      };
-      es.onerror = () => {
-        try { es?.close(); } catch {}
-      };
-    } catch {
-      // ignore
-    }
+    let lastTimestamp = 0;
+    let pollInterval: NodeJS.Timeout | null = null;
 
-    const pollEvents = async () => {
+    const fetchEvents = async () => {
       try {
-        // Check for timeout (5 minutes max polling)
-        if (startTimeRef.current && Date.now() - startTimeRef.current > 5 * 60 * 1000) {
-          console.log(`[AgentRunnerPage] Polling timeout reached for runId: ${runId}, stopping polling`);
-          setIsRunning(false);
-          return;
-        }
+        const url = lastTimestamp > 0
+          ? `/api/agent-events?runId=${encodeURIComponent(runId)}&since=${lastTimestamp}`
+          : `/api/agent-events?runId=${encodeURIComponent(runId)}`;
 
-        const res = await fetch(`/api/agent-events?runId=${runId}&limit=100`);
-        const data = await res.json();
-        if (data.items) {
-          setEvents(data.items);
-          
+        const response = await fetch(url);
+        const data = await response.json();
+
+        if (data.items && data.items.length > 0) {
+          console.log(`[AgentRunnerPage] Fetched ${data.items.length} new events`);
+
+          const newEvents: AgentEvent[] = data.items.map((item: any) => ({
+            id: item.id,
+            agent: item.agent || 'unknown',
+            status: item.status || 'info',
+            message: item.message || '',
+            step: item.step ?? null,
+            timestamp: Number(item.timestamp || Date.now()),
+            receivedAt: Date.now(),
+          }));
+
+          // Update lastTimestamp
+          const maxTimestamp = Math.max(...newEvents.map(e => e.timestamp));
+          if (maxTimestamp > lastTimestamp) {
+            lastTimestamp = maxTimestamp;
+          }
+
+          // Add new events to the list
+          setEvents((prevEvents) => {
+            const updated = [...prevEvents, ...newEvents];
+            return updated.slice(-500); // Keep last 500 events
+          });
+
           // Check if run is completed
-          const lastEvent = data.items[data.items.length - 1];
-          if (lastEvent && (
-            lastEvent.status === 'completed' || 
-            lastEvent.status === 'error' || 
+          const lastEvent = newEvents[newEvents.length - 1];
+          if (
+            lastEvent.status === 'completed' ||
+            lastEvent.status === 'error' ||
             lastEvent.status === 'finished' ||
             lastEvent.status === 'failed' ||
             lastEvent.status === 'segmentation_finished' ||
             lastEvent.status === 'flow_finished'
-          )) {
+          ) {
             console.log(`[AgentRunnerPage] Run completed with status: ${lastEvent.status}, stopping polling`);
             setIsRunning(false);
           }
         }
       } catch (error) {
-        console.error('Failed to fetch events:', error);
+        console.error('[AgentRunnerPage] Failed to fetch events:', error);
       }
     };
 
-    // Poll immediately and then every 3 seconds (different from EventFeed to reduce overlap)
-    pollEvents();
-    const interval = setInterval(pollEvents, 3000);
+    // Initial fetch
+    fetchEvents();
+
+    // Poll every 2 seconds
+    pollInterval = setInterval(fetchEvents, 2000);
+
+    // Timeout mechanism
+    const timeout = setTimeout(() => {
+      console.log(`[AgentRunnerPage] Timeout reached for runId: ${runId}, stopping polling`);
+      setIsRunning(false);
+    }, 10 * 60 * 1000); // 10 minutes
 
     return () => {
-      clearInterval(interval);
+      if (pollInterval) {
+        console.log(`[AgentRunnerPage] Stopping polling for runId: ${runId}`);
+        clearInterval(pollInterval);
+      }
+      clearTimeout(timeout);
       startTimeRef.current = null;
-      try { es?.close(); } catch {}
     };
   }, [runId, isRunning]);
 
@@ -138,7 +136,7 @@ export default function AgentRunnerPage() {
 
     try {
       console.log('🚀 Starting agent run...');
-      const res = await fetch('/api/run', { 
+      const res = await fetch('/api/run', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -148,13 +146,13 @@ export default function AgentRunnerPage() {
           max_rounds: maxRounds
         })
       });
-      
+
       const data: RunResult = await res.json();
       console.log('📊 Agent run response:', data);
-      
+
       setRunId(data.runId);
       setResult(data.result);
-      
+
       if (!data.forwarded) {
         console.warn('⚠️ Request not forwarded to agents service:', data.error || 'Unknown reason');
         setIsRunning(false);
@@ -174,7 +172,7 @@ export default function AgentRunnerPage() {
     setCronMessage(null);
     setEvents([]);
     setResult(null);
-    
+
     try {
       // Dümdüz cronjob'ı tetikle, cronjob her şeyi halleder
       const resp = await fetch('/api/run-team', {
@@ -182,13 +180,13 @@ export default function AgentRunnerPage() {
         headers: { 'Content-Type': 'application/json' },
       });
 
-      console.log('🚀 Cronjob response:', resp);
+      console.log('RESPONSE 111', resp);
 
       const data = await resp.json().catch(() => ({}));
-      
-      console.log('🚀 Cronjob data:', data);
 
-      
+      console.log('RESPONSE 222', resp);
+
+
       // Cronjob'dan dönen response'dan run_id'yi al
       if (data?.response?.run_id) {
         setRunId(data.response.run_id);
@@ -209,7 +207,7 @@ export default function AgentRunnerPage() {
     switch (status.toLowerCase()) {
       case 'started': return 'text-blue-400 bg-blue-400/10';
       case 'progress': return 'text-yellow-400 bg-yellow-400/10';
-      case 'completed': 
+      case 'completed':
       case 'finished': return 'text-green-400 bg-green-400/10';
       case 'error': return 'text-red-400 bg-red-400/10';
       default: return 'text-gray-400 bg-gray-400/10';

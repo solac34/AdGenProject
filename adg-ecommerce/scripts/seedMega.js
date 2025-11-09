@@ -29,11 +29,11 @@ const SA_JSON = process.env.GCP_SERVICE_ACCOUNT_JSON;
 // SEED_TOTAL_USERS, SEED_ORDER_CHANCE, SEED_ANON_COUNT
 // SEED_US_SHARE, SEED_EU_SHARE, SEED_OTHER_SHARE (sum should be ~1.0)
 const CONFIG = {
-  totalUsers: Number(process.env.SEED_TOTAL_USERS || 26),
+  totalUsers: Number(process.env.SEED_TOTAL_USERS || 2),
   minSessionsPerUser: 1,
   maxSessionsPerUser: 10,
   orderChance: Number(process.env.SEED_ORDER_CHANCE || 0.25),
-  anonSessionCount: Number(process.env.SEED_ANON_COUNT || 20),
+  anonSessionCount: Number(process.env.SEED_ANON_COUNT || 1),
   locationDistribution: {
     us: Number(process.env.SEED_US_SHARE || 0.50),
     eu: Number(process.env.SEED_EU_SHARE || 0.40),
