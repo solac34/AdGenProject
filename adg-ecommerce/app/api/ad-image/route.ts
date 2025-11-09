@@ -58,6 +58,30 @@ function publicUrlFor(objectName: string): string {
   return `https://storage.googleapis.com/${BUCKET}/${encodeURI(objectName)}`;
 }
 
+/**
+ * Convert gs:// URLs to https:// format. If URL is already https://, return as-is.
+ * gs://bucket/path -> https://storage.googleapis.com/bucket/path
+ */
+function normalizeGcsUrl(url: string | undefined | null): string | null {
+  if (!url) return null;
+  const trimmed = url.trim();
+  if (!trimmed) return null;
+  
+  // Already https:// → return as-is
+  if (trimmed.startsWith("https://") || trimmed.startsWith("http://")) {
+    return trimmed;
+  }
+  
+  // gs://bucket/path → https://storage.googleapis.com/bucket/path
+  if (trimmed.startsWith("gs://")) {
+    const withoutProtocol = trimmed.substring(5); // Remove "gs://"
+    return `https://storage.googleapis.com/${withoutProtocol}`;
+  }
+  
+  // Unknown format → return as-is
+  return trimmed;
+}
+
 async function findImageFromSegmentationsDoc(
   firestore: Firestore,
   segmentation: string,
@@ -215,7 +239,10 @@ export async function POST(request: Request) {
     if (segmentation && city) {
       const fsImage = await findImageFromSegmentationsDoc(firestore, segmentation, city, country);
       if (fsImage) {
-        return NextResponse.json({ ok: true, imageUrl: fsImage, strategy: "firestore_segmentation" });
+        const normalizedUrl = normalizeGcsUrl(fsImage);
+        if (normalizedUrl) {
+          return NextResponse.json({ ok: true, imageUrl: normalizedUrl, strategy: "firestore_segmentation" });
+        }
       }
     }
 
@@ -238,7 +265,8 @@ export async function POST(request: Request) {
       } catch {}
     }
     if (gcsImage) {
-      return NextResponse.json({ ok: true, imageUrl: gcsImage, strategy: "gcs_fallback", city, country, segmentation });
+      const normalizedGcsImage = normalizeGcsUrl(gcsImage) || gcsImage;
+      return NextResponse.json({ ok: true, imageUrl: normalizedGcsImage, strategy: "gcs_fallback", city, country, segmentation });
     }
 
     return NextResponse.json({ ok: false, error: "no_image_available", city, country, segmentation }, { status: 404 });
