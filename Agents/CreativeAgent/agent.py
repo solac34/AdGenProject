@@ -37,7 +37,7 @@ def save_content_to_gcs(content: bytes, object_name: str, *, content_type: str =
     - bucket is resolved from env var GCS_EC_BUCKET_NAME (or GCS_CONTENT_BUCKET for backward compatibility)
       and defaults to 'ecommerce-ad-contents'
     - object_name supports folder paths, e.g. 'segmentation_location/image_0.jpg'
-    Returns a public HTTPS URL if possible (or a signed URL), else gs:// URI.
+    Returns a public HTTPS URL (tries public access first, then signed URL, then fallback HTTPS URL).
     """
     print(f"🧩 [GCS] save_content_to_gcs called: object_name='{object_name}', content_type='{content_type}'")
     bucket = (
@@ -98,16 +98,20 @@ def save_content_to_gcs(content: bytes, object_name: str, *, content_type: str =
         blob.make_public()
         print(f"🔗 [GCS] object made public: {blob.public_url}")
         return blob.public_url
-    except Exception:
-        # Fallback: signed URL (7 days). If this fails, return gs:// URI.
+    except Exception as e:
+        print(f"⚠️  [GCS] failed to make public: {e}")
+        # Fallback: signed URL (7 days). If this fails, return public HTTPS URL.
         try:
             url = blob.generate_signed_url(expiration=3600 * 24 * 7, method="GET")
             print(f"🔐 [GCS] returning signed URL: {url}")
             return url
-        except Exception:
-            gs = f"gs://{bucket}/{object_name}"
-            print(f"🔎 [GCS] fallback gs URI: {gs}")
-            return gs
+        except Exception as e2:
+            # Final fallback: convert gs:// to public HTTPS URL
+            # gs://bucket/path -> https://storage.googleapis.com/bucket/path
+            https_url = f"https://storage.googleapis.com/{bucket}/{object_name}"
+            print(f"⚠️  [GCS] failed to generate signed URL: {e2}")
+            print(f"🌐 [GCS] returning public HTTPS URL (fallback): {https_url}")
+            return https_url
 
 
 def read_segmentations_to_generate(limit: int = 50):

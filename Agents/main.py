@@ -300,9 +300,19 @@ def run_agent():
         
         prompt = data['prompt']
         max_rounds = data.get('max_rounds', 8)
-        run_id = request.headers.get('X-Run-Id') or f"http-{uuid.uuid4().hex[:8]}"
+        run_id = data.get('run_id') or request.headers.get('X-Run-Id') or f"http-{uuid.uuid4().hex[:8]}"
         
-        logger.info(f"📥 Received request: prompt='{prompt[:50]}...', max_rounds={max_rounds}")
+        # Set webhook environment variables if provided in request
+        webhook_url = data.get('webhook_url')
+        webhook_secret = data.get('webhook_secret')
+        if webhook_url:
+            os.environ['WEBHOOK_URL'] = webhook_url
+            logger.info(f"🔔 Webhook URL set: {webhook_url}")
+        if webhook_secret:
+            os.environ['WEBHOOK_SECRET'] = webhook_secret
+            logger.info(f"🔑 Webhook secret configured")
+        
+        logger.info(f"📥 Received request: prompt='{prompt[:50]}...', max_rounds={max_rounds}, run_id={run_id}")
         
         # Run agent asynchronously
         result = asyncio.run(run_agent_with_rollover(prompt, max_rounds, run_id=run_id))

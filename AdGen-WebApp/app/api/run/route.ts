@@ -19,6 +19,14 @@ export async function POST(request: Request) {
   console.log(`[run api] Prompt: ${prompt.substring(0, 100)}${prompt.length > 100 ? '...' : ''}`);
   console.log(`[run api] Max rounds: ${maxRounds}`);
 
+  // Construct webhook URL for the agent service
+  const protocol = request.headers.get('x-forwarded-proto') || 'http';
+  const host = request.headers.get('host') || 'localhost:3000';
+  const webhookUrl = `${protocol}://${host}/api/agent-events`;
+  const webhookSecret = process.env.WEBHOOK_SECRET || 'dev-secret-123';
+
+  console.log(`[run api] Webhook URL: ${webhookUrl}`);
+
   try {
     const res = await fetch(agentsUrl, {
       method: 'POST',
@@ -31,6 +39,9 @@ export async function POST(request: Request) {
       body: JSON.stringify({
         prompt,
         max_rounds: maxRounds,
+        webhook_url: webhookUrl,
+        webhook_secret: webhookSecret,
+        run_id: runId,
       }),
       // Set a longer timeout for agent processing
       signal: AbortSignal.timeout(120000), // 2 minutes
