@@ -1,5 +1,6 @@
 import { categories, getProductsByCategoryId } from "@/lib/data";
 import ProductGrid from "@/components/ProductGrid";
+import AdBox from "@/components/AdBox";
 
 export default function HomePage() {
   return (
@@ -7,6 +8,9 @@ export default function HomePage() {
       <section className="hero">
         <h1>Everything In One Place</h1>
         <p>Clean, negative-space design. Fast, simple and delightful shopping.</p>
+      </section>
+      <section style={{ margin: "24px 0" }}>
+        <AdBox />
       </section>
       {categories.map((c) => {
         const prods = getProductsByCategoryId(c.id).slice(0, 8);

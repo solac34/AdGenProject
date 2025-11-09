@@ -3,12 +3,16 @@
 import { ReactNode, useEffect } from "react";
 import { usePageViewTracking } from "@/lib/track";
 import { fetchCityCountry } from "@/lib/geo";
+import { assignAnonymousSegmentFromLocation } from "@/lib/segment";
 
 export default function TrackerProvider({ children }: { children: ReactNode }) {
   usePageViewTracking();
   useEffect(() => {
     // Force refresh geo (handles IP changes)
-    void fetchCityCountry(true);
+    fetchCityCountry(true).finally(() => {
+      // After geo refresh, derive anonymous segment
+      void assignAnonymousSegmentFromLocation(false);
+    });
     const onVisibility = () => {
       if (document.visibilityState === "hidden") {
         // placeholder to allow sendBeacon in some browsers

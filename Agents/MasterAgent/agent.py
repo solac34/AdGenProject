@@ -13,10 +13,6 @@ from .firestore_helper import get_past_events_from_firestore, get_firestore_clie
 from google.cloud import firestore
 
 
-def segmentation_result_displayer(segmentation_result: dict):
-    print(segmentation_result)
-    return "segmentation result displayed"
-
 
 
 MASTER_AGENT_INSTRUCTION = """
@@ -25,17 +21,14 @@ You are the Master Agent of the AdGen project, responsible for orchestrating dat
 > WHEN YOU ARE TOLD TO DO YOUR SEGMENTATION TASK:
 1. Transfer to data_analytic_agent to perform the task. 
 2. Agent will do everything automatically without any user interaction.
-3. You will be returned:
-{
-  "status": "finished | conntinue",
-  "users": {'user_id': 'user_123', 'segmentation_result': 'segmentation_result_1', ...},
-}
-return this to the user.
+3. You will be returned a STRICT minimal JSON:
+{"status": "segmentation_finished"} or {"status": "segmentation_continue"}
+Return this JSON to the user verbatim.
 
 > WHEN YOU ARE TOLD TO CREATE CONTENT: 
 1. Transfer to creative_agent and tell it to create  which content is deamnded to create (ecommerce content, marketing content) and also tell extras if extra things is specified.
 2. It will create content for all segmentation and location pairs for given content type and will write it all to gcs. 
-3. Return {status: "finished", created_content_count: 10, created_content_list: ["content_1", "content_2", ...]}
+3. Return {status: "flow_finished", created_content_count: N, created_content_list: ["content_1", "content_2", ...]}
 
 """
 
@@ -48,14 +41,10 @@ master_agent = Agent(
     name='master_agent',
     description=MASTER_AGENT_DESCRIPTION,
     instruction=MASTER_AGENT_INSTRUCTION,
-    tools=[
-        segmentation_result_displayer,
-    ],
     sub_agents=[
         data_analytic_agent,
         creative_agent
     ]
 )
 
-# Projenin kök ajanı (root) master_agent'tir
 root_agent = master_agent

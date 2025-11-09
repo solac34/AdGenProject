@@ -8,89 +8,59 @@
 📦 Ürün katalogu yükleniyor...
    ✓ 100 ürün yüklendi
 
-👥 PHASE 1: 2500 kullanıcı oluşturuluyor...
-   500/2500 kullanıcı oluşturuldu
-   1000/2500 kullanıcı oluşturuldu
-   1500/2500 kullanıcı oluşturuldu
-   2000/2500 kullanıcı oluşturuldu
-   2500/2500 kullanıcı oluşturuldu
-   ✓ 2500 kullanıcı oluşturuldu
+👥 PHASE 1: 58 kullanıcı oluşturuluyor...
+   ✓ 58 kullanıcı oluşturuldu
    📍 Lokasyon Dağılımı:
-      US: 1235 (%49.4)
-      EU: 999 (%40.0)
-      Diğer: 266 (%10.6)
+      US: 25 (%43.1)
+      EU: 28 (%48.3)
+      Diğer: 5 (%8.6)
+   🏷️  Kategori Deviation Dağılımı:
+      1 Kategori (dev:0): 43 (%74.1)
+      2 Kategori (dev:1): 15 (%25.9)
 
 💾 Kullanıcılar Firestore'a yazılıyor...
-   1000/2500 kullanıcı yazıldı
-   2000/2500 kullanıcı yazıldı
-   2500/2500 kullanıcı yazıldı
+   58/58 kullanıcı yazıldı
    ✓ Firestore yazma tamamlandı
 
 📊 PHASE 2: Signup, event ve order verileri oluşturuluyor...
    ⚠️ Bu işlem 2500 user için ~10-15 dakika sürebilir...
 
-   250/2500 kullanıcının verileri oluşturuldu (16440 event, 160 order)
-   500/2500 kullanıcının verileri oluşturuldu (32901 event, 315 order)
-   750/2500 kullanıcının verileri oluşturuldu (50010 event, 459 order)
-   1000/2500 kullanıcının verileri oluşturuldu (66375 event, 607 order)
-   1250/2500 kullanıcının verileri oluşturuldu (82721 event, 749 order)
-   1500/2500 kullanıcının verileri oluşturuldu (98883 event, 894 order)
-   1750/2500 kullanıcının verileri oluşturuldu (115637 event, 1025 order)
-   2000/2500 kullanıcının verileri oluşturuldu (131601 event, 1168 order)
-   2250/2500 kullanıcının verileri oluşturuldu (147569 event, 1302 order)
-   2500/2500 kullanıcının verileri oluşturuldu (164242 event, 1456 order)
-   ✓ 2500 kullanıcı için veri oluşturuldu
-   📝 2500 signup flow
-   👻 11036 anonymous signup eventi (signup öncesi)
-   📈 164242 event
-   🛒 1456 order
+   ✓ 58 kullanıcı için veri oluşturuldu
+   📝 58 signup flow
+   👻 260 anonymous signup eventi (signup öncesi)
+   📈 5245 event
+   🛒 69 order
 
-👤 PHASE 3: 300 tam anonim session oluşturuluyor...
-   ✓ 300 anonim session oluşturuldu
-   📈 Toplam event sayısı: 171008
+👤 PHASE 3: 40 tam anonim session oluşturuluyor...
+   ✓ 40 anonim session oluşturuldu
+   📈 Toplam event sayısı: 6200
 
 💾 PHASE 4: BigQuery'e veriler yazılıyor...
 
-🛒 1456 sipariş yazılıyor...
-   ✓ 1000/1456 sipariş yazıldı
-   ✓ 1456/1456 sipariş yazıldı
+🛒 69 sipariş yazılıyor...
+   ✓ 69/69 sipariş yazıldı
 
-📊 171008 event yazılıyor...
-   ✓ 10000/171008 event yazıldı
-   ✓ 20000/171008 event yazıldı
-   ✓ 30000/171008 event yazıldı
-   ✓ 40000/171008 event yazıldı
-   ✓ 50000/171008 event yazıldı
-   ✓ 60000/171008 event yazıldı
-   ✓ 70000/171008 event yazıldı
-   ✓ 80000/171008 event yazıldı
-   ✓ 90000/171008 event yazıldı
-   ✓ 100000/171008 event yazıldı
-   ✓ 110000/171008 event yazıldı
-   ✓ 120000/171008 event yazıldı
-   ✓ 130000/171008 event yazıldı
-   ✓ 140000/171008 event yazıldı
-   ✓ 150000/171008 event yazıldı
-   ✓ 160000/171008 event yazıldı
-   ✓ 170000/171008 event yazıldı
-   ✓ 171008/171008 event yazıldı
+📊 6200 event yazılıyor...
+   ✓ 6200/6200 event yazıldı
 
 ================================================================================
 ✅ VERİ OLUŞTURMA TAMAMLANDI! - MEGA VERSION
 ================================================================================
-👥 Kullanıcı: 2500
-📝 Signup Flow: 2500
-👻 Anonymous signup eventi: 11036 (signup öncesi)
-📊 Toplam Event: 171008
-🛒 Sipariş: 1456
-📍 Lokasyon: %49 US, %40 EU, %11 Diğer
+👥 Kullanıcı: 58
+📝 Signup Flow: 58
+👻 Anonymous signup eventi: 260 (signup öncesi)
+📊 Toplam Event: 6200
+🛒 Sipariş: 69
+📍 Lokasyon: %43 US, %48 EU, %9 Diğer
+🏷️  Kategori Dev: %74 tek kategori, %26 iki kategori
 
 🆕 v3 ÖZELLİKLERİ:
    ✓ DOĞRU signup akışı: anonymous → signup → user_id
    ✓ Aynı session'da hem anonymous hem user_id eventi
    ✓ Firestore field: "id" → "user_id"
-   ✓ 5x veri: 2500 user, 171008 event
+   ✓ 5x veri: 58 user, 6200 event
    ✓ Signup öncesi tüm eventler anonymous
    ✓ Signup sonrası tüm eventler user_id ile
+   ✓ Kullanıcı başına kategori deviation: min:0 max:1 (hedef: %70 tek kategori)
 ================================================================================
 

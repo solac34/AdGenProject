@@ -1,6 +1,10 @@
 {
   "compilerOptions": {
     "target": "ES2022",
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["*"]
+    },
     "lib": [
       "ES2022",
       "DOM",

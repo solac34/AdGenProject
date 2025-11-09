@@ -20,9 +20,13 @@ function formatDuration(ms: number): string {
 
 export default function JobTable() {
   const [now, setNow] = useState(() => new Date());
+  const [mounted, setMounted] = useState(false);
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(id);
+  }, []);
+  useEffect(() => {
+    setMounted(true);
   }, []);
 
   const jobs: JobInfo[] = useMemo(
@@ -58,12 +62,18 @@ export default function JobTable() {
             return (
               <tr key={i} className="odd:bg-brand-gray4 even:bg-brand-gray3/30">
                 <td className="px-4 py-3">{job.name}</td>
-                <td className="px-4 py-3 text-zinc-300">{job.lastRun.toLocaleString()}</td>
-                <td className="px-4 py-3">
-                  <span className="inline-flex items-center gap-2 rounded-lg bg-brand-gray3/50 px-3 py-1 text-xs">
-                    <span className="h-2 w-2 rounded-full bg-brand-blue animate-pulse" />
-                    in {formatDuration(remaining)}
-                  </span>
+                <td className="px-4 py-3 text-zinc-300" suppressHydrationWarning>
+                  {mounted ? job.lastRun.toLocaleString() : '—'}
+                </td>
+                <td className="px-4 py-3" suppressHydrationWarning>
+                  {mounted ? (
+                    <span className="inline-flex items-center gap-2 rounded-lg bg-brand-gray3/50 px-3 py-1 text-xs">
+                      <span className="h-2 w-2 rounded-full bg-brand-blue animate-pulse" />
+                      in {formatDuration(remaining)}
+                    </span>
+                  ) : (
+                    '—'
+                  )}
                 </td>
               </tr>
             );

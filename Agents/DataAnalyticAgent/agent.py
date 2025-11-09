@@ -1,4 +1,5 @@
 from google.adk.agents.llm_agent import Agent
+import time
 from .bq_helper import bq_to_dataframe, query_to_temp_table
 import os
 import sys
@@ -7,6 +8,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from MasterAgent.firestore_helper import get_firestore_client, get_past_events_from_firestore
 from google.cloud import firestore
 import uuid 
+from webhook import report_progress
 
 
 # Ortam değişkenlerini .env formatına uyarlama
@@ -23,6 +25,22 @@ if os.getenv('GOOGLE_GENAI_USE_VERTEXAI', '').lower() in ['true', '1']:
     if os.getenv('GOOGLE_APPLICATION_CREDENTIALS_AI'):
         os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = os.getenv('GOOGLE_APPLICATION_CREDENTIALS_AI', '')
 
+
+def _run_id() -> str:
+    return os.getenv("AGENTS_CURRENT_RUN_ID") or f"local-{uuid.uuid4().hex[:6]}"
+
+def _progress(status: str, message: str, *, step: str | None = None, meta: dict | None = None) -> None:
+    try:
+        report_progress(
+            run_id=_run_id(),
+            agent="DataAnalyticAgent",
+            status=status,
+            message=message,
+            step=step,
+            meta=meta,
+        )
+    except Exception:
+        pass
 
 
 
@@ -41,6 +59,7 @@ def retrieve_user_activity_counts():
             }
         }
     """
+    _progress("progress", "Starting retrieve_user_activity_counts", step="retrieve_user_activity_counts")
     print(f"🔍 retrieve_user_activity_counts çağrıldı")
     
     # 1. Event counts query
@@ -85,6 +104,15 @@ def retrieve_user_activity_counts():
     print(f"✅ retrieve_user_activity_counts RESULT:")
     print(f"   Status: {result.get('status')}")
     print(f"   Data Reference: {result.get('data_reference')}")
+    try:
+        _progress(
+            "success",
+            "Finished retrieve_user_activity_counts",
+            step="retrieve_user_activity_counts",
+            meta={"data_reference": result.get("data_reference")},
+        )
+    except Exception:
+        pass
     
     return result
 
@@ -92,6 +120,7 @@ def retrieve_user_activity_counts():
 
 def write_user_activity_to_firestore(data_reference: dict):
 
+    _progress("progress", "Starting write_user_activity_to_firestore", step="write_user_activity_to_firestore", meta={"data_reference": data_reference})
     print(f"🔍 write_user_activity_to_firestore çağrıldı")
     print(f"📥 Gelen data_reference: {data_reference}")
     
@@ -146,7 +175,9 @@ def write_user_activity_to_firestore(data_reference: dict):
     print(f"✅ Firestore'a yazıldı: user_activity_counts/{doc_id}")
     print(f"   Örnek veri: {list(user_activity.items())[:2]}")
 
-    return f"{len(user_activity)} user activity records written to firestore as document: {doc_id}"
+    msg = f"{len(user_activity)} user activity records written to firestore as document: {doc_id}"
+    _progress("success", "Finished write_user_activity_to_firestore", step="write_user_activity_to_firestore", meta={"total_users": len(user_activity), "doc_id": doc_id})
+    return msg
 
 
 
@@ -154,6 +185,7 @@ def write_users_to_segmentate(user_ids: list):
     """
     'users_to_segmentate' collection'ına users'ı tek tek (state=pending) yazar.
     """
+    _progress("progress", "Starting write_users_to_segmentate", step="write_users_to_segmentate", meta={"count": len(user_ids or [])})
     print(f"🔍 write_users_to_segmentate çağrıldı")
     print(f"📥 {len(user_ids)} kullanıcı yazılacak")
     
@@ -185,6 +217,7 @@ def write_users_to_segmentate(user_ids: list):
         batch.commit()
     
     print(f"✅ Toplam {count} kullanıcı 'users_to_segmentate' collection'ına yazıldı (state: pending)")
+    _progress("success", "Finished write_users_to_segmentate", step="write_users_to_segmentate", meta={"written": count})
     return f"{count} users written to Firestore collection 'users_to_segmentate' with state: pending"
 
 
@@ -199,6 +232,7 @@ def compare_event_counts(data_reference: dict):
     Returns:
         dict: {status, data_reference, users_to_segment_count, written_to_firestore}
     """
+    _progress("progress", "Starting compare_event_counts", step="compare_event_counts", meta={"data_reference": data_reference})
     project = data_reference.get('project')
     dataset = data_reference.get('dataset')
     table = data_reference.get('table')
@@ -247,6 +281,7 @@ def compare_event_counts(data_reference: dict):
     else:
         print("ℹ️ Segmentlenecek yeni kullanıcı bulunamadı")
     
+    _progress("success", "Finished compare_event_counts", step="compare_event_counts", meta={"users_to_segment_count": len(new_or_increased_users)})
     return {
         "status": "success",
         "data_reference": data_reference,
@@ -257,12 +292,13 @@ def compare_event_counts(data_reference: dict):
 
 def read_users_to_segmentate():
     """
-    Firestore'dan state=pending olan 20 kullanıcıyı alır ve 
+    Firestore'dan state=pending olan 10 kullanıcıyı alır ve 
     BigQuery'den bu kullanıcıların tüm event ve orderlarını çeker.
     
     Returns:
         dict: {
             "status": "success" | "no_pending_users",
+            "pending_total": int,
             "users": [
                 {
                     "user_id": "...",
@@ -273,15 +309,27 @@ def read_users_to_segmentate():
             ]
         }
     """
+    _progress("progress", "Starting read_users_to_segmentate", step="read_users_to_segmentate")
     print(f"🔍 read_users_to_segmentate çağrıldı")
     
     # Firestore'dan pending kullanıcıları al
     db = get_firestore_client()
     
+    # Pending toplam sayısını ölç (karar için kullanılacak)
+    try:
+        pending_total = sum(
+            1
+            for _ in db.collection('users_to_segmentate')
+            .where('state', '==', 'pending')
+            .stream()
+        )
+    except Exception:
+        pending_total = 0
+    
     pending_users_query = (
         db.collection('users_to_segmentate')
         .where('state', '==', 'pending')
-        .limit(20)
+        .limit(5)
         .stream()
     )
     
@@ -289,9 +337,11 @@ def read_users_to_segmentate():
     
     if not pending_users:
         print("⚠️ Pending durumunda kullanıcı bulunamadı")
+        _progress("success", "Finished read_users_to_segmentate (no_pending_users)", step="read_users_to_segmentate", meta={"pending_total": pending_total})
         return {
             "status": "no_pending_users",
-            "users": []
+            "users": [],
+            "pending_total": pending_total
         }
     
     print(f"✅ {len(pending_users)} pending kullanıcı bulundu")
@@ -335,9 +385,11 @@ def read_users_to_segmentate():
     
     print(f"✅ {len(users_data)} kullanıcının verileri hazırlandı")
     
+    _progress("success", "Finished read_users_to_segmentate", step="read_users_to_segmentate", meta={"users_fetched": len(users_data), "pending_total": pending_total})
     return {
         "status": "success",
-        "users": users_data
+        "users": users_data,
+        "pending_total": pending_total
     }
 
 
@@ -353,6 +405,7 @@ def write_user_segmentation_result(user_id: str, segmentation_result: str):
     Returns:
         str: Confirmation message
     """
+    _progress("progress", "Starting write_user_segmentation_result", step="write_user_segmentation_result", meta={"user_id": user_id})
     print(f"🔍 write_user_segmentation_result çağrıldı: {user_id}")
     
     db = get_firestore_client()
@@ -367,14 +420,14 @@ def write_user_segmentation_result(user_id: str, segmentation_result: str):
     
     # 2. users_to_segmentate'te state'i success yap
     pending_doc_ref = db.collection('users_to_segmentate').document(user_id)
-    pending_doc_ref.update({
-        'state': 'success',
-        'completed_at': firestore.SERVER_TIMESTAMP
-    })
+    pending_doc_ref.delete()
     
     print(f"✅ Kullanıcı {user_id} segmentasyonu tamamlandı (state: success)")
+    # Throttle to avoid LLM QPS/RPM limits between tool calls
+    time.sleep(2.0)
     
-    return f"User {user_id} segmentation result written and marked as success"
+    _progress("success", "Finished write_user_segmentation_result", step="write_user_segmentation_result", meta={"user_id": user_id})
+    return "success"
 
 
 def write_segmentation_results_to_firestore(segmentation_results: dict):
@@ -382,6 +435,7 @@ def write_segmentation_results_to_firestore(segmentation_results: dict):
     Segmentation sonuçlarını Firestore'a batch olarak yazar.
     Tüm dict tek seferde 'segmentation_results' dokümanına kaydedilir.
     """
+    _progress("progress", "Starting write_segmentation_results_to_firestore", step="write_segmentation_results_to_firestore", meta={"count": len(segmentation_results or {})})
     db = get_firestore_client()
     # Tüm segmentation results'ı tek bir dokümana yaz
     doc_ref = db.collection('segmentation_results').document('latest_batch')
@@ -390,22 +444,33 @@ def write_segmentation_results_to_firestore(segmentation_results: dict):
         'count': len(segmentation_results),
         'timestamp': firestore.SERVER_TIMESTAMP
     })
+    _progress("success", "Finished write_segmentation_results_to_firestore", step="write_segmentation_results_to_firestore", meta={"count": len(segmentation_results or {})})
     return f"{len(segmentation_results)} segmentation results written to firestore in single batch"
 
 
 def write_segmentation_location_pairs_to_firestore():
     """
     For each user in user_segmentations, fetches their segmentation_result and user_location (city, country) from users collection.
-    Writes an array of pairs (segmentation_result, city, country) to Firestore collection 'segmentation_location_pairs',
-    document 'latest'.
+    Creates/updates a document in 'segmentations' collection for each unique
+    (segmentation_result, city, country) triple.
+
+    - Document ID format: segmentation_city_country (all normalized with underscores)
+    - Fields written:
+        segmentation_name, city, country
+        imageUrl: "" (ONLY when creating a new document)
+        updated_at: server timestamp
     """
+    _progress("progress", "Starting write_segmentation_location_pairs_to_firestore", step="write_segmentation_location_pairs_to_firestore")
     db = get_firestore_client()
 
     # 1. Read user_segmentations collection (get all docs)
     segmentations_ref = db.collection('user_segmentations')
     segmentation_docs = segmentations_ref.stream()
 
-    pairs = []
+    def normalize(s: str) -> str:
+        return str(s or "").strip().replace("/", "_").replace("\\", "_").replace(",", "").replace(" ", "_")
+
+    written = 0
     for doc in segmentation_docs:
         user_id = doc.id
         segmentation_result = doc.to_dict().get('segmentation_result', None)
@@ -430,22 +495,27 @@ def write_segmentation_location_pairs_to_firestore():
         # Fallbacks if missing
         city = city if city else ''
         country = country if country else ''
-        pairs.append({
-            "segmentation_result": segmentation_result,
+        # Build doc_id as segmentation_city_country with underscores
+        doc_id = f"{normalize(segmentation_result)}_{normalize(city)}_{normalize(country)}"
+        seg_doc_ref = db.collection('segmentations').document(doc_id)
+        existing = seg_doc_ref.get()
+        base_payload = {
+            "segmentation_name": segmentation_result,
             "city": city,
             "country": country,
-            "user_id": user_id
-        })
+            "updated_at": firestore.SERVER_TIMESTAMP,
+        }
+        if existing.exists:
+            # Preserve existing imageUrl if any; just upsert core fields
+            seg_doc_ref.set(base_payload, merge=True)
+        else:
+            # Create with empty imageUrl so CreativeAgent can pick it up
+            base_payload["imageUrl"] = ""
+            seg_doc_ref.set(base_payload, merge=True)
+        written += 1
 
-    # Write array to Firestore
-    doc_ref = db.collection('segmentation_location_pairs').document('latest')
-    doc_ref.set({
-        "pairs": pairs,
-        "count": len(pairs),
-        "timestamp": firestore.SERVER_TIMESTAMP
-    })
-
-    return f"{len(pairs)} segmentation/location pairs written to segmentation_location_pairs/latest"
+    _progress("success", "Finished write_segmentation_location_pairs_to_firestore", step="write_segmentation_location_pairs_to_firestore", meta={"written": written})
+    return f"{written} segmentation documents upserted into 'segmentations' with underscore IDs"
 
 
 DATA_ANALYTIC_AGENT_INSTRUCTION = """
@@ -515,7 +585,7 @@ You will always return the result to the master agent without interrupting the e
     }
 
 📊 Tool 3: read_users_to_segmentate()
-→ Purpose: Get 20 pending users and their events/orders from BigQuery
+→ Purpose: Get 10 pending users and their events/orders from BigQuery
 → Parameters: NONE
 → Returns: dict with status and users array
 → What it does internally:
@@ -567,19 +637,12 @@ Immediately AFTER comparing, you MUST call write_user_activity_to_firestore with
 
 STEP 3:
 Run read_users_to_segmentate tool to get the users to segmentate.
-If there are no users to segmentate, return to the master agent and report that no users were segmented.
-Below is example of the return value if there are users to segmentate:
-  {
-    "status": "success",
-    "users": [
-      {
-        "user_id": "user_123",
-        "events": [{event_type: "page_view", ...}, ...],
-        "orders": [{order_id: "ord_1", total_amount: 150, ...}, ...]
-      },
-      ...  (up to 20 users)
-    ]
-  }
+If read_users_to_segmentate returns status="no_pending_users", IMMEDIATELY return ONLY {"status": "segmentation_finished"} and STOP. Do not call any other tool or produce any extra text.
+Important: Do NOT early-return based on pending length when there ARE users. Process up to 5 users now (the tool already limits to 5).
+After finishing all writes (STEP 5), decide final status using 'pending_total' returned from STEP 3:
+  let remaining = pending_total - 5
+  If remaining > 0 => return {"status": "continue"}
+  Else => return {"status": "segmentation_finished"}
 
 STEP 4: Perform segmentation on each user (AI analysis)
 STEP 4.1. Give 6 segmentations each based on 6 different criteria.
@@ -589,6 +652,8 @@ Step 4.1.3. Based on user's total spent. 0-250 low 250-1000 medium 1000+ high
 Step 4.1.4. Based on gift wrap in last session. Yes or No
 Step 4.1.5. Based on shopping cart abandonment in last session. Yes or No
 Step 4.1.6. Based on different location in last session. Yes or No 
+Step 4.2. Expected result schema is session2EventCountLow-session2OrderCountLow-totalSpentLow-giftWrapYes-shoppingCartAbandonmentYes-differentLocationNo
+
 
 
 
@@ -597,17 +662,17 @@ STEP 5: For each user, call write_user_segmentation_result(user_id, result)
   1. Write result to 'user_segmentations' collection
   2. Mark user as 'success' in 'users_to_segmentate'
   3. Return confirmation
+After you finish writing results for up to 5 users in this batch, immediately compute the final status (using pending_total from STEP 3) and STOP. Do not produce extra prose or make additional calls; proceed directly to STEP 6.
 
 
-STEP 7: return a final compact summary to the master agent. If no users, then pass empty users object. Do NOT include batch logs or raw data:
-{
-  "status": "finished",
-  "users": {'user_id': 'user_123', 'segmentation_result': 'segmentation_result_1', ...},
-}
+STEP 6 (FINAL RETURN FORMAT - STRICT):
+Return ONLY a minimal JSON object. No prose, no lists, no logs. If STEP 3 returned status="no_pending_users", this MUST be {"status":"segmentation_finished"}.
+  {"status": "segmentation_finished"}   or   {"status": "continue"}
 
-SIDE TASK. Write segmentation location pairs to firestore:
-1. run write_segmentation_location_pairs_to_firestore tool to write the segmentation location pairs to firestore.
-2. return confirmation: "Segmentation location pairs written to firestore"
+SIDE TASK. Populate 'segmentations' collection (doc_id = segmentation_city_country):
+1. Run write_segmentation_location_pairs_to_firestore tool to upsert docs into 'segmentations'.
+2. Behavior: For each user segmentation, create/update a doc with fields {segmentation_name, city, country}. When creating a new doc, set imageUrl="".
+3. Return confirmation like: "N segmentation documents upserted into 'segmentations' with underscore IDs"
 
 SIDE TASK. When Master Agent says: "Write user activity counts to firestore"
 

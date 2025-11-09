@@ -2,11 +2,11 @@
 
 import { useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import TopNav from '../components/TopNav';
 import SegmentationChart from '../components/SegmentationChart';
 import JobTable from '../components/JobTable';
 import RunStatusPanel from '../components/RunStatusPanel';
 import RunButton from '../components/RunButton';
+import InstructionCard from '../components/InstructionCard';
 
 export default function HomePage() {
   const [isRunning, setIsRunning] = useState(false);
@@ -37,7 +37,6 @@ export default function HomePage() {
 
   return (
     <div className="mx-auto max-w-7xl p-5 sm:p-8">
-      <TopNav />
       <header className="mb-8">{headerTitle}</header>
 
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
@@ -82,31 +81,18 @@ export default function HomePage() {
         </motion.aside>
       </div>
 
-      <motion.div
-        initial={{ opacity: 0, y: 12 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4 }}
-        className="mt-4 flex items-center justify-center"
-      >
-        <div className="relative">
-          <div className="pointer-events-none absolute -inset-x-16 -top-10 z-[-1] h-24 rounded-full bg-brand-blue/30 blur-3xl" />
-          <RunButton
-            size="lg"
-            isRunning={isRunning}
-            onClick={async () => {
-              if (isRunning) return;
-              setIsRunning(true);
-              try {
-                const res = await fetch('/api/run', { method: 'POST' });
-                const data = (await res.json()) as { runId: string };
-                setRunId(data.runId);
-              } catch {
-                setRunId(Math.random().toString(36).slice(2));
-              }
-            }}
-          />
-        </div>
-      </motion.div>
+      {/* Run button removed from home per request; use Agent Runner page instead */}
+
+      <div className="mt-10 grid grid-cols-1 md:grid-cols-3 gap-6">
+        <InstructionCard docId="masterAgentInstruction" title="Master Agent Instruction" />
+        <InstructionCard docId="dataAnalyticAgentInstruction" title="Data Analytic Agent Instruction" />
+        <InstructionCard docId="creativeAgentInstruction" title="Creative Agent Instruction" />
+      </div>
+      <div className="mt-6">
+        <a href="/segmentations" className="text-sm text-brand-blue hover:underline">
+          Go to Segmentations ›
+        </a>
+      </div>
     </div>
   );
 }
