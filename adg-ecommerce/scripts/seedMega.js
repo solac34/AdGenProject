@@ -26,11 +26,11 @@ const SA_JSON = process.env.GCP_SERVICE_ACCOUNT_JSON;
 
 // ============= CONFIGURATION =============
 const CONFIG = {
-  totalUsers: 58,
+  totalUsers: 26,
   minSessionsPerUser: 1,
   maxSessionsPerUser: 10,
   orderChance: 0.25,
-  anonSessionCount: 40,
+  anonSessionCount: 20,
   locationDistribution: {
     us: 0.50,
     eu: 0.40,

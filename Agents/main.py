@@ -75,6 +75,7 @@ setup_environment()
 # Import agent after environment setup
 from MasterAgent.agent import root_agent
 from google.adk.runners import InMemoryRunner
+from google.adk.agents.run_config import RunConfig
 from google.genai import types
 
 # Configure logging
@@ -122,6 +123,27 @@ async def run_agent_with_rollover(prompt: str, max_rounds: int = 8) -> dict:
         logger.info(f"Round {rounds} session_id={session_id}")
         last_text: Optional[str] = None
         
+        # Prefer Google AI API (API key) for segmentation bursts to reduce Vertex 429s,
+        # but keep Vertex for content creation (Imagen).
+        original_project = None
+        original_location = None
+        lower_prompt = (current_prompt or "").lower()
+        is_content_task = any(
+            key in lower_prompt
+            for key in [
+                "content creation",
+                "create content",
+                "marketing image",
+                "create_marketing_image",
+                "imagen",
+            ]
+        )
+        if not is_content_task:
+            original_project = os.environ.pop("GOOGLE_CLOUD_PROJECT", None)
+            original_location = os.environ.pop("GOOGLE_CLOUD_LOCATION", None)
+            if os.getenv("GOOGLE_API_KEY") and not os.getenv("GOOGLE_GENAI_API_KEY"):
+                os.environ["GOOGLE_GENAI_API_KEY"] = os.environ["GOOGLE_API_KEY"]
+
         try:
             async with InMemoryRunner(agent=agent_instance, app_name="agents") as runner:
                 new_message = types.Content(parts=[types.Part(text=current_prompt)], role="user")
@@ -138,6 +160,7 @@ async def run_agent_with_rollover(prompt: str, max_rounds: int = 8) -> dict:
                     user_id=user_id,
                     session_id=session_id,
                     new_message=new_message,
+                    run_config=RunConfig(max_llm_calls=30),
                 ):
                     # Capture agent response
                     if event.content and event.content.parts:
@@ -153,6 +176,12 @@ async def run_agent_with_rollover(prompt: str, max_rounds: int = 8) -> dict:
                 "statuses": statuses,
                 "success": False
             }
+        finally:
+            # Restore Vertex env hints if we had temporarily removed them
+            if original_project is not None:
+                os.environ["GOOGLE_CLOUD_PROJECT"] = original_project
+            if original_location is not None:
+                os.environ["GOOGLE_CLOUD_LOCATION"] = original_location
         
         # Parse result
         try:
@@ -181,7 +210,8 @@ async def run_agent_with_rollover(prompt: str, max_rounds: int = 8) -> dict:
                 'Continue the user segmentation task. '
                 'Start by calling read_users_to_segmentate. If it returns status="no_pending_users", '
                 'IMMEDIATELY return {"status":"finished"} with no further calls. '
-                'Process up to 5 pending users by calling write_user_segmentation_result for each. '
+                'Do NOT call retrieve_user_activity_counts, compare_event_counts, or write_user_activity_to_firestore. '
+                'Only process up to 5 pending users by calling write_user_segmentation_result for each. '
                 'Then decide: let remaining = pending_total - 5. '
                 'If remaining > 0 return {"status":"continue"} else return {"status":"finished"}. '
                 'Return only the minimal JSON. Do not produce any extra text.'
@@ -246,9 +276,32 @@ def run_agent():
         
         # Run agent asynchronously
         result = asyncio.run(run_agent_with_rollover(prompt, max_rounds))
+        # Post-finish workflow (non-breaking): chain two follow-up sessions when finished
+        try:
+            main_status = extract_status(result.get("result")) or ""
+        except Exception:
+            main_status = ""
+        post_steps = {}
+        if (main_status or "").lower() == "finished":
+            # Step 1: populate segmentation location pairs via data agent
+            step1_prompt = (
+                "Transfer to data_analytic_agent and run write_segmentation_location_pairs_to_firestore. "
+                "Return only completed or failed."
+            )
+            step1_out = asyncio.run(run_agent_with_rollover(step1_prompt, max_rounds=2))
+            post_steps["location_pairs"] = step1_out.get("result")
+            # Step 2: content creation
+            step2_prompt = (
+                "Do your content creation task for ecommerce. "
+                "Return only completed or failed."
+            )
+            step2_out = asyncio.run(run_agent_with_rollover(step2_prompt, max_rounds=2))
+            post_steps["content_creation"] = step2_out.get("result")
         
         logger.info(f"📤 Request completed: rounds={result.get('rounds')}, success={result.get('success')}")
         
+        if post_steps:
+            result["post_steps"] = post_steps
         return jsonify(result), 200
         
     except Exception as e:

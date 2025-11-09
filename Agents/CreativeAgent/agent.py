@@ -21,13 +21,14 @@ def save_content_to_gcs(content: bytes, object_name: str, *, content_type: str =
     - object_name supports folder paths, e.g. 'segmentation_location/image_0.jpg'
     Returns a public HTTPS URL if possible (or a signed URL), else gs:// URI.
     """
-    
+    print(f"🧩 [GCS] save_content_to_gcs called: object_name='{object_name}', content_type='{content_type}'")
     bucket = (
         bucket_name
         or os.getenv("GCS_EC_BUCKET_NAME")
         or os.getenv("GCS_CONTENT_BUCKET")
         or "ecommerce-ad-contents"
     )
+    print(f"🪣 [GCS] target bucket resolved: {bucket}")
     
     # Try environment-based service account JSON first (Cloud Run compatible)
     sa_json = os.getenv('GCP_SERVICE_ACCOUNT_JSON') or os.getenv('GCP_SERVICE_ACCOUNT_JSON_BQ')
@@ -44,37 +45,51 @@ def save_content_to_gcs(content: bytes, object_name: str, *, content_type: str =
                 ],
             )
             client = storage.Client(credentials=credentials)
+            print("🔐 [GCS] using credentials from GCP_SERVICE_ACCOUNT_JSON(_BQ)")
         except Exception:
             # Fall back to default ADC
             client = storage.Client()
+            print("⚠️  [GCS] failed parsing service account JSON, using default ADC")
     else:
         # Fallback to file-based credentials or default ADC
         creds_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS_AI")
         if creds_path and os.path.exists(creds_path):
             credentials = service_account.Credentials.from_service_account_file(creds_path)
             client = storage.Client(credentials=credentials)
+            print(f"🔐 [GCS] using GOOGLE_APPLICATION_CREDENTIALS_AI file: {creds_path}")
         else:
             # Use default ADC (Application Default Credentials)
             client = storage.Client()
+            print("ℹ️  [GCS] using default ADC")
     
     bucket_obj = client.bucket(bucket)
     # Ensure a subfolder path is used and uniqueness if plain name provided
+    # Normalize leading slash if present
+    if object_name.startswith("/"):
+        object_name = object_name.lstrip("/")
     if "/" not in object_name:
         # place inside folder with the given name for neat organization
         base = object_name.replace(".jpg", "")
         object_name = f"{base}/{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}-{uuid4().hex}.jpg"
+    print(f"📄 [GCS] final object path: {object_name}")
     blob = bucket_obj.blob(object_name)
     blob.upload_from_string(content, content_type=content_type)
+    print("✅ [GCS] upload completed")
     # Try to make the object publicly accessible and return its public URL.
     try:
         blob.make_public()
+        print(f"🔗 [GCS] object made public: {blob.public_url}")
         return blob.public_url
     except Exception:
         # Fallback: signed URL (7 days). If this fails, return gs:// URI.
         try:
-            return blob.generate_signed_url(expiration=3600 * 24 * 7, method="GET")
+            url = blob.generate_signed_url(expiration=3600 * 24 * 7, method="GET")
+            print(f"🔐 [GCS] returning signed URL: {url}")
+            return url
         except Exception:
-            return f"gs://{bucket}/{object_name}"
+            gs = f"gs://{bucket}/{object_name}"
+            print(f"🔎 [GCS] fallback gs URI: {gs}")
+            return gs
 
 
 def read_segmentations_to_generate(limit: int = 50):
@@ -87,12 +102,14 @@ def read_segmentations_to_generate(limit: int = 50):
     def normalize(s: str) -> str:
         return str(s).strip().replace("/", "_").replace("\\", "_").replace(",", "").replace(" ", "_")
 
-        
+    print(f"🗂️  [Creative] read_segmentations_to_generate(limit={limit})")
     db = get_firestore_client()
     col = db.collection('segmentations')
     # Fetch a page and filter locally for simplicity
     docs = col.limit(limit).stream()
     items: List[Dict[str, Any]] = []
+    skipped_no_fields = 0
+    skipped_has_image = 0
     for d in docs:
         data = d.to_dict() or {}
         seg_name = data.get("segmentation_name") or data.get("segmentation") or ""
@@ -100,13 +117,16 @@ def read_segmentations_to_generate(limit: int = 50):
         country = data.get("country") or ""
         image_url = data.get("imageUrl") or ""
         if not seg_name or not city:
+            skipped_no_fields += 1
             continue
         if image_url:
+            skipped_has_image += 1
             continue
         # Use underscore-based ID format for consistency with API
         doc_id = f"{normalize(seg_name)}_{normalize(city)}_{normalize(country)}"
         name = f"{normalize(seg_name)}_{normalize(city)}_{normalize(country)}"
         items.append({"segmentation_name": seg_name, "city": city, "country": country, "doc_id": doc_id, "name": name})
+    print(f"📊 [Creative] found {len(items)} items to generate, skipped_no_fields={skipped_no_fields}, skipped_has_image={skipped_has_image}")
     return items
 
 
@@ -117,7 +137,10 @@ def create_marketing_image(
     aspect_ratio: str = "16:9",
     output_dir: str = "generated",
     name: str = "segmentation_location",
-    object_name: str | None = None,
+    object_name: str = "",
+    segmentation_name: str = "",
+    city: str = "",
+    country: str = "",
 ):
     """
     Generate marketing image(s) using Google's Imagen through google-genai.
@@ -131,6 +154,28 @@ def create_marketing_image(
     Returns:
         A list of saved image file paths.
     """
+    print(f"🎨 [Creative] create_marketing_image called: aspect_ratio={aspect_ratio}, num_images={number_of_images}, name={name}")
+    # If caller didn't provide object_name, build nested folder path from segmentation_name/city/country
+    computed_prefix = ""
+    if not object_name:
+        def norm_folder(s: str) -> str:
+            return (
+                str(s or "")
+                .strip()
+                .replace("/", "_")
+                .replace("\\", "_")
+                .replace(",", "")
+                .replace(" ", "_")
+            )
+        seg_parts = [p.strip() for p in str(segmentation_name).split("-") if p.strip()]
+        city_country = ""
+        if city or country:
+            city_country = norm_folder(f"{city}_{country}".strip("_"))
+        nested_parts = seg_parts + ([city_country] if city_country else [])
+        computed_prefix = "/".join([p for p in nested_parts if p])
+        if not computed_prefix:
+            computed_prefix = norm_folder(name)
+        print(f"🧮 [Creative] computed folder prefix from segmentation: {computed_prefix}")
     # Use Vertex AI (project/location) to avoid 404s on the Imagen predict route
     project_id = (
         os.environ.get("GOOGLE_CLOUD_PROJECT")
@@ -148,6 +193,7 @@ def create_marketing_image(
             "GOOGLE_CLOUD_PROJECT (or GCLOUD_PROJECT/PROJECT_ID) is not set. "
             "Set your GCP project for Vertex AI image generation."
         )
+    print(f"🧭 [Creative] Vertex config: project={project_id}, location={location}")
     client = genai.Client(
         vertexai=True,
         project=project_id,
@@ -170,6 +216,7 @@ def create_marketing_image(
     print("================================================")
 
     if not getattr(result, "generated_images", None):
+        print("⚠️  [Creative] no generated_images in result")
         return []
 
     out_dir = Path(output_dir)
@@ -180,9 +227,16 @@ def create_marketing_image(
         # Get image bytes directly from the response
         content_bytes = generated_image.image.image_bytes
         # Save to GCS using provided nested object path if present
-        target_object = object_name or f"{name}/{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}-{uuid4().hex}_{n}.jpg"
+        if object_name:
+            target_object = object_name
+        elif computed_prefix:
+            target_object = f"{computed_prefix}/image_{n+1}.jpg"
+        else:
+            target_object = f"{name}/image_{n+1}.jpg"
+        print(f"📝 [Creative] saving image {n+1}/{len(result.generated_images)} to '{target_object}'")
         gcs_uri = save_content_to_gcs(content_bytes, target_object, content_type="image/jpeg")
         saved_paths.append(gcs_uri)
+    print(f"✅ [Creative] saved {len(saved_paths)} images → {saved_paths[:2]}{'...' if len(saved_paths)>2 else ''}")
 
     return saved_paths
 
@@ -197,8 +251,16 @@ def create_marketing_images_batch(items: List[Dict[str, Any]]):
         List of {"name": str, "uris": ["gs://..."] }
     """
     def norm_folder(s: str) -> str:
-        return str(s or "").strip().replace("/", "_").replace("\\", "_").replace(" ", "_")
+        return (
+            str(s or "")
+            .strip()
+            .replace("/", "_")
+            .replace("\\", "_")
+            .replace(",", "")
+            .replace(" ", "_")
+        )
 
+    print(f"🧺 [Creative] create_marketing_images_batch: items={len(items or [])}")
     results = []
     for item in items or []:
         prompt = item.get("prompt", "").strip()
@@ -206,13 +268,20 @@ def create_marketing_images_batch(items: List[Dict[str, Any]]):
         segmentation_name = item.get("segmentation_name", "") or item.get("segmentation_result", "")
         city = item.get("city", "")
         country = item.get("country", "")
-        # Build nested folder path following rule in DataAnalyticAgent (line ~609)
-        # segmentation parts are split by '-' and appended sequentially as folders
+        # Build nested folder path:
+        # - Split segmentation_name by '-' and use each as a folder
+        # - Then append a single folder "City_Country" (city first), normalized
         seg_parts = [p.strip() for p in str(segmentation_name).split("-") if p.strip()]
-        nested_parts = seg_parts + ([norm_folder(country)] if country else []) + ([norm_folder(city)] if city else [])
-        base_prefix = "/".join(nested_parts)
+        city_country = ""
+        if city or country:
+            city_country = norm_folder(f"{city}_{country}".strip("_"))
+        nested_parts = seg_parts + ([city_country] if city_country else [])
+        base_prefix = "/".join([p for p in nested_parts if p])
         # Final object path under the deepest folder
         object_name = f"{base_prefix}/{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}-{uuid4().hex}.jpg"
+        print(f"🧷 [Creative] item name={name}, seg='{segmentation_name}', city='{city}', country='{country}'")
+        print(f"🧩 [Creative] prompt(len={len(prompt)}): {prompt[:120]}{'...' if len(prompt)>120 else ''}")
+        print(f"📁 [Creative] computed object path: {object_name}")
         if not prompt:
             results.append({"name": name, "uris": [], "error": "empty prompt"})
             continue
@@ -223,6 +292,9 @@ def create_marketing_images_batch(items: List[Dict[str, Any]]):
             output_dir=item.get("output_dir", "generated"),
             name=name,
             object_name=object_name,
+            segmentation_name=segmentation_name,
+            city=city,
+            country=country,
         )
         # Assign back to Firestore if doc_id provided
         try:
@@ -238,10 +310,13 @@ def create_marketing_images_batch(items: List[Dict[str, Any]]):
                     if item.get(k):
                         payload[k] = item[k]
                 seg_doc.set(payload, merge=True)
+                print(f"📝 [Creative] firestore updated for doc_id={doc_id} with imageUrl={uris[0]}")
         except Exception as e:
             results.append({"name": name, "uris": uris, "warning": f"firestore_update_failed: {e}"})
+            print(f"⚠️  [Creative] firestore update failed for doc {item.get('doc_id')}: {e}")
             continue
         results.append({"name": name, "uris": uris})
+    print(f"🏁 [Creative] batch generation done, {len(results)} items processed")
     return results
 
 
