@@ -4,6 +4,7 @@ const PROJECT_ID = process.env.GCP_PROJECT_ID || process.env.GOOGLE_CLOUD_PROJEC
 const DATABASE_ID = process.env.FIRESTORE_DB_ID || "(default)";
 const KEYFILE = process.env.GOOGLE_APPLICATION_CREDENTIALS || process.env.BQ_KEYFILE;
 const SA_JSON = process.env.GCP_SERVICE_ACCOUNT_JSON;
+const FORCE_MOCK = (process.env.FORCE_FIRESTORE_MOCK || "").trim() === "1";
 
 let firestoreInstance: Firestore | null = null;
 let isDevMode = process.env.NODE_ENV !== 'production';
@@ -62,9 +63,9 @@ export function getFirestore(): any {
     return firestoreInstance;
   }
 
-  // Always use mock in development, and also in production if no credentials
-  if (isDevMode || (!SA_JSON && !KEYFILE)) {
-    console.warn("[Firestore] Using mock Firestore (no credentials configured or dev mode)");
+  // Explicitly allow forcing mock via env (useful for tests)
+  if (FORCE_MOCK) {
+    console.warn("[Firestore] Using mock Firestore (FORCE_FIRESTORE_MOCK=1)");
     return new MockFirestore() as any;
   }
 
@@ -74,8 +75,10 @@ export function getFirestore(): any {
         ? JSON.parse(SA_JSON)
         : JSON.parse(Buffer.from(SA_JSON as string, "base64").toString("utf8"));
       firestoreInstance = new Firestore({ projectId: PROJECT_ID, databaseId: DATABASE_ID, credentials });
+      console.log("[Firestore] Initialized with explicit service account JSON");
     } else if (KEYFILE) {
       firestoreInstance = new Firestore({ projectId: PROJECT_ID, databaseId: DATABASE_ID, keyFilename: KEYFILE });
+      console.log("[Firestore] Initialized with key file from GOOGLE_APPLICATION_CREDENTIALS");
     } else {
       // Try application default credentials
       firestoreInstance = new Firestore({
@@ -83,11 +86,12 @@ export function getFirestore(): any {
         databaseId: DATABASE_ID,
         ignoreUndefinedProperties: true
       });
+      console.log("[Firestore] Initialized with Application Default Credentials (ADC)");
     }
 
     return firestoreInstance;
   } catch (error) {
-    console.warn("[Firestore] Failed to initialize, using mock:", error);
+    console.warn("[Firestore] Failed to initialize with credentials, falling back to mock:", error);
 
     // Always return mock instead of throwing (both dev and prod)
     return new MockFirestore() as any;
