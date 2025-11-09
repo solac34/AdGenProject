@@ -13,7 +13,23 @@ const eventsCache = new Map<string, Array<{
   message: string;
   step?: string | number | null;
   timestamp: number;
+  receivedAt: number;
 }>>();
+
+// Live SSE subscribers per runId
+const subscribers = new Map<string, Set<(evt: any) => void>>();
+
+function publish(runId: string, evt: any) {
+  const subs = subscribers.get(runId);
+  if (!subs || subs.size === 0) return;
+  for (const send of subs) {
+    try {
+      send(evt);
+    } catch {
+      // ignore failing client
+    }
+  }
+}
 
 // Clean up old runs from cache (keep only last 30 minutes)
 const CACHE_TTL = 30 * 60 * 1000; // 30 minutes
@@ -52,12 +68,13 @@ export async function POST(req: NextRequest) {
     // Store event in cache
     const eventTimestamp = timestamp || Date.now();
     const event = {
-      id: `${runId}-${eventTimestamp}`,
+      id: `${runId}-${eventTimestamp}-${Math.random().toString(36).slice(2,7)}`,
       agent,
       status,
       message: message || '',
       step: step ?? null,
-      timestamp: eventTimestamp
+      timestamp: eventTimestamp,
+      receivedAt: Date.now(),
     };
 
     if (!eventsCache.has(runId)) {
@@ -67,10 +84,13 @@ export async function POST(req: NextRequest) {
     const events = eventsCache.get(runId)!;
     events.push(event);
 
-    // Keep only last 500 events per run
+    // Keep only last 500 events per run (memory replay)
     if (events.length > 500) {
       events.shift();
     }
+
+    // Broadcast live to SSE subscribers (best-effort)
+    publish(runId, event);
 
     return Response.json({ ok: true });
 
@@ -85,23 +105,88 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const runId = searchParams.get('runId');
   const since = parseInt(searchParams.get('since') || '0');
+  const sse = searchParams.get('sse') === '1';
 
   if (!runId) {
     return Response.json({ error: 'runId is required' }, { status: 400 });
   }
 
   try {
-    const events = eventsCache.get(runId) || [];
+    // Live SSE stream
+    if (sse) {
+      const abortSignal = req.signal;
+      const stream = new ReadableStream({
+        start(controller) {
+          const encoder = new TextEncoder();
+          let closed = false;
 
-    // Filter events after 'since' timestamp (for incremental updates)
-    const newEvents = since > 0
-      ? events.filter(e => e.timestamp > since)
-      : events;
+          const safeEnqueue = (data: any) => {
+            if (closed) return;
+            try {
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+            } catch {
+              cleanup();
+            }
+          };
 
-    return Response.json({
-      items: newEvents,
-      total: events.length
-    });
+          const send = (evt: any) => safeEnqueue(evt);
+
+          const set = subscribers.get(runId) || new Set<(evt: any) => void>();
+          set.add(send);
+          subscribers.set(runId, set);
+
+          // Replay recent events so UI shows history immediately
+          const recent = (eventsCache.get(runId) || []).slice(-100);
+          for (const e of recent) safeEnqueue(e);
+
+          const hb = setInterval(() => {
+            if (!closed) {
+              try { controller.enqueue(new TextEncoder().encode(`: ping\n\n`)); } catch { cleanup(); }
+            }
+          }, 15000);
+
+          const cleanup = () => {
+            if (closed) return;
+            closed = true;
+            clearInterval(hb);
+            const current = subscribers.get(runId);
+            if (current) {
+              current.delete(send);
+              if (current.size === 0) subscribers.delete(runId);
+            }
+            try { controller.close(); } catch {}
+          };
+
+          // @ts-ignore
+          (controller as any)._cleanup = cleanup;
+          try {
+            if (abortSignal && typeof abortSignal.addEventListener === 'function') {
+              abortSignal.addEventListener('abort', cleanup, { once: true } as any);
+            }
+          } catch {}
+        },
+        cancel() {
+          try {
+            // @ts-ignore
+            const cleanup = (this as any)._cleanup as (() => void) | undefined;
+            if (typeof cleanup === 'function') cleanup();
+          } catch {}
+        }
+      });
+      return new Response(stream, {
+        headers: {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache, no-transform',
+          Connection: 'keep-alive',
+          'X-Accel-Buffering': 'no'
+        },
+      });
+    }
+
+    // Return from local memory cache
+    const memEvents = eventsCache.get(runId) || [];
+    const newEvents = since > 0 ? memEvents.filter(e => e.timestamp > since) : memEvents;
+    return Response.json({ items: newEvents, total: memEvents.length });
   } catch (error) {
     console.error('[agent-events] GET error:', error);
     return Response.json({ items: [], total: 0 });

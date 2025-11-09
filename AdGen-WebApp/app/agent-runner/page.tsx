@@ -21,9 +21,11 @@ type RunResult = {
 };
 
 export default function AgentRunnerPage() {
+  const TOTAL_EVENTS = 22;
   const [isRunning, setIsRunning] = useState(false);
   const [runId, setRunId] = useState<string | null>(null);
   const [events, setEvents] = useState<AgentEvent[]>([]);
+  const [progressPercent, setProgressPercent] = useState<number>(0);
   const [prompt, setPrompt] = useState('Do your segmentation task. Process pending users and return appropriate status.');
   const [maxRounds, setMaxRounds] = useState(8);
   const [result, setResult] = useState<any>(null);
@@ -31,13 +33,60 @@ export default function AgentRunnerPage() {
   const [cronMessage, setCronMessage] = useState<string | null>(null);
   const eventsEndRef = useRef<HTMLDivElement>(null);
   const startTimeRef = useRef<number | null>(null);
+  const fakeTickerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Auto-scroll to bottom when new events arrive
   useEffect(() => {
     eventsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [events]);
 
-  // Polling for agent events (works with Cloud Run)
+  // Live SSE stream for instant updates (with polling fallback below)
+  useEffect(() => {
+    if (!runId || !isRunning) return;
+
+    let es: EventSource | null = null;
+    try {
+      es = new EventSource(`/api/agent-events?runId=${encodeURIComponent(runId)}&sse=1`);
+      es.onmessage = (evt) => {
+        try {
+          const parsed = JSON.parse(evt.data || '{}');
+          const newEvent: AgentEvent = {
+            id: String(parsed.id),
+            agent: parsed.agent || 'unknown',
+            status: parsed.status || 'info',
+            message: parsed.message || '',
+            step: parsed.step ?? null,
+            timestamp: Number(parsed.timestamp || Date.now()),
+            receivedAt: Date.now(),
+          };
+          setEvents((prev) => {
+            if (prev.some((e) => e.id === newEvent.id)) return prev;
+            const updated = [...prev, newEvent];
+            const terminalStatuses = ['completed','finished','failed','error','segmentation_finished','flow_finished'];
+            const hasTerminal = terminalStatuses.includes((newEvent.status || '').toLowerCase());
+            if (hasTerminal || updated.length >= TOTAL_EVENTS) {
+              setProgressPercent(100);
+              setIsRunning(false);
+            }
+            return updated.slice(-500);
+          });
+        } catch {
+          // ignore malformed
+        }
+      };
+      es.onerror = () => {
+        try { es?.close(); } catch {}
+      };
+    } catch {
+      // ignore
+    }
+
+    return () => {
+      try { es?.close(); } catch {}
+    };
+  }, [runId, isRunning]);
+
+  // Polling for agent events (safety net)
   useEffect(() => {
     if (!runId || !isRunning) {
       startTimeRef.current = null;
@@ -83,6 +132,11 @@ export default function AgentRunnerPage() {
           // Add new events to the list
           setEvents((prevEvents) => {
             const updated = [...prevEvents, ...newEvents];
+            const terminalStatuses = ['completed','finished','failed','error','segmentation_finished','flow_finished'];
+            const hasTerminal = updated.some(e => terminalStatuses.includes((e.status || '').toLowerCase()));
+            if (hasTerminal || updated.length >= TOTAL_EVENTS) {
+              setProgressPercent(100);
+            }
             return updated.slice(-500); // Keep last 500 events
           });
 
@@ -98,6 +152,7 @@ export default function AgentRunnerPage() {
           ) {
             console.log(`[AgentRunnerPage] Run completed with status: ${lastEvent.status}, stopping polling`);
             setIsRunning(false);
+            setProgressPercent(100);
           }
         }
       } catch (error) {
@@ -108,8 +163,8 @@ export default function AgentRunnerPage() {
     // Initial fetch
     fetchEvents();
 
-    // Poll every 2 seconds
-    pollInterval = setInterval(fetchEvents, 2000);
+    // Poll every 1.5 seconds for redundancy
+    pollInterval = setInterval(fetchEvents, 1500);
 
     // Timeout mechanism
     const timeout = setTimeout(() => {
@@ -127,11 +182,39 @@ export default function AgentRunnerPage() {
     };
   }, [runId, isRunning]);
 
+  // Fake progress ticker (show-only). While running, smoothly increases up to 96%.
+  useEffect(() => {
+    if (!isRunning) {
+      if (fakeTickerRef.current) {
+        clearInterval(fakeTickerRef.current);
+        fakeTickerRef.current = null;
+      }
+      return;
+    }
+    if (fakeTickerRef.current) return;
+    fakeTickerRef.current = setInterval(() => {
+      setProgressPercent((p) => {
+        if (p >= 96) return p; // cap until terminal
+        // increase by 0.5% - 2.0%
+        const inc = 0.5 + Math.random() * 1.5;
+        const next = Math.min(96, p + inc);
+        return next;
+      });
+    }, 600);
+    return () => {
+      if (fakeTickerRef.current) {
+        clearInterval(fakeTickerRef.current);
+        fakeTickerRef.current = null;
+      }
+    };
+  }, [isRunning]);
+
   const startAgentRun = async () => {
     if (isRunning) return;
 
     setIsRunning(true);
     setEvents([]);
+    setProgressPercent(0);
     setResult(null);
 
     try {
@@ -171,9 +254,27 @@ export default function AgentRunnerPage() {
     setCronLoading(true);
     setCronMessage(null);
     setEvents([]);
+    setProgressPercent(0);
     setResult(null);
+    setIsRunning(true); // start UI immediately
 
     try {
+      // Seed demo data first
+      try {
+        await fetch('/api/seedmega', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            totalUsers: 2,
+            anonCount: 0,
+            orderChance: 1.0,
+            usShare: 100,
+            euShare: 0,
+            otherShare: 0,
+          }),
+        });
+      } catch {}
+
       // Dümdüz cronjob'ı tetikle, cronjob her şeyi halleder
       const resp = await fetch('/api/run-team', {
         method: 'POST',
@@ -292,19 +393,29 @@ export default function AgentRunnerPage() {
                       Live
                     </div>
                   )}
-                  <span className="text-xs text-zinc-400">{events.length} events</span>
                 </div>
               </div>
 
-              {/* Events List */}
-              <div className="h-96 overflow-y-auto space-y-2 scrollbar-thin scrollbar-track-brand-gray3 scrollbar-thumb-brand-blue/30">
-                <AnimatePresence>
-                  {events.length === 0 ? (
-                    <div className="flex items-center justify-center h-full text-zinc-400">
-                      {isRunning ? 'Waiting for events...' : 'No events yet. Start an agent run to see real-time progress.'}
-                    </div>
-                  ) : (
-                    events.map((event, index) => (
+              {/* Progress Bar */}
+              <div className="mb-4">
+                <div className="flex items-center justify-between text-xs text-zinc-400 mb-1">
+                  <span>Progress</span>
+                  <span>{Math.round(progressPercent)}%</span>
+                </div>
+                <div className="h-2 rounded-full bg-white/10 overflow-hidden">
+                  <div
+                    className="h-full bg-emerald-500 transition-all duration-500"
+                    style={{ width: `${progressPercent}%` }}
+                  />
+                </div>
+                {/* Intentionally hide event count */}
+              </div>
+
+              {/* Events List - hidden until first event arrives */}
+              {events.length > 0 && (
+                <div className="h-96 overflow-y-auto space-y-2 scrollbar-thin scrollbar-track-brand-gray3 scrollbar-thumb-brand-blue/30">
+                  <AnimatePresence>
+                    {events.map((event, index) => (
                       <motion.div
                         key={event.id}
                         initial={{ opacity: 0, y: 10 }}
@@ -332,11 +443,11 @@ export default function AgentRunnerPage() {
                           </div>
                         </div>
                       </motion.div>
-                    ))
-                  )}
-                </AnimatePresence>
-                <div ref={eventsEndRef} />
-              </div>
+                    ))}
+                  </AnimatePresence>
+                  <div ref={eventsEndRef} />
+                </div>
+              )}
             </div>
           </div>
         </motion.div>
