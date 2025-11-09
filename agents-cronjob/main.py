@@ -75,20 +75,47 @@ async def cronjob_async(request):
         headers["X-Run-Id"] = run_id
         logger.info(f"🆔 Generated run ID: {run_id}")
 
-        payload = {"prompt": prompt, "max_rounds": max_rounds}
+        # Prepare webhook configuration for agents service
+        webhook_url = os.getenv("WEBHOOK_URL", "")
+        webhook_secret = os.getenv("WEBHOOK_SECRET", "")
+        logger.info(f"🔔 Webhook URL: {webhook_url or 'Not configured'}")
+        
+        payload = {
+            "prompt": prompt, 
+            "max_rounds": max_rounds,
+            "run_id": run_id,
+        }
+        
+        # Add webhook info if available
+        if webhook_url:
+            payload["webhook_url"] = webhook_url
+        if webhook_secret:
+            payload["webhook_secret"] = webhook_secret
+            
         logger.info(f"📝 Initial prompt: '{prompt}' (max_rounds: {max_rounds})")
 
-        # Helper: call Agents /run with given prompt, using same headers/run_id
+        # Helper: call Agents /run with given prompt, using same headers/run_id and webhook config
         async def call_agent(run_prompt: str):
             logger.info(f"🚀 Starting API call to {run_url} with prompt: '{run_prompt[:50]}...'")
             body_text = ""
             status_code_inner = 0
             start_time = datetime.now(timezone.utc)
             
+            # Build request payload with webhook info
+            request_payload = {
+                "prompt": run_prompt, 
+                "max_rounds": max_rounds,
+                "run_id": run_id,
+            }
+            if webhook_url:
+                request_payload["webhook_url"] = webhook_url
+            if webhook_secret:
+                request_payload["webhook_secret"] = webhook_secret
+            
             try:
                 async with httpx.AsyncClient(timeout=600.0) as client:
                     logger.info(f"⏳ Sending POST request to agents service...")
-                    resp_inner = await client.post(run_url, headers=headers, json={"prompt": run_prompt, "max_rounds": max_rounds})
+                    resp_inner = await client.post(run_url, headers=headers, json=request_payload)
                     body_text = resp_inner.text
                     status_code_inner = resp_inner.status_code
                     

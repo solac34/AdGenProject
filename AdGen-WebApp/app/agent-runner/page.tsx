@@ -27,6 +27,8 @@ export default function AgentRunnerPage() {
   const [prompt, setPrompt] = useState('Do your segmentation task. Process pending users and return appropriate status.');
   const [maxRounds, setMaxRounds] = useState(8);
   const [result, setResult] = useState<any>(null);
+  const [cronLoading, setCronLoading] = useState(false);
+  const [cronMessage, setCronMessage] = useState<string | null>(null);
   const eventsEndRef = useRef<HTMLDivElement>(null);
   const startTimeRef = useRef<number | null>(null);
 
@@ -166,6 +168,43 @@ export default function AgentRunnerPage() {
     }
   };
 
+  const runAgentTeam = async () => {
+    if (cronLoading) return;
+    setCronLoading(true);
+    setCronMessage(null);
+    setEvents([]);
+    setResult(null);
+    
+    try {
+      // Dümdüz cronjob'ı tetikle, cronjob her şeyi halleder
+      const resp = await fetch('/api/run-team', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+
+      console.log('🚀 Cronjob response:', resp);
+
+      const data = await resp.json().catch(() => ({}));
+      
+      console.log('🚀 Cronjob data:', data);
+
+      
+      // Cronjob'dan dönen response'dan run_id'yi al
+      if (data?.response?.run_id) {
+        setRunId(data.response.run_id);
+        setIsRunning(true);
+        setCronMessage('Agent team run triggered successfully.');
+      } else {
+        setCronMessage(data?.ok ? 'Agent team run triggered.' : `Trigger returned status ${data?.status || 'unknown'}`);
+      }
+    } catch (e) {
+      setCronMessage('Failed to trigger agent team. Check logs or network.');
+      setIsRunning(false);
+    } finally {
+      setCronLoading(false);
+    }
+  };
+
   const getStatusColor = (status: string) => {
     switch (status.toLowerCase()) {
       case 'started': return 'text-blue-400 bg-blue-400/10';
@@ -206,84 +245,43 @@ export default function AgentRunnerPage() {
         </p>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Control Panel */}
-        <motion.div
-          initial={{ opacity: 0, x: -20 }}
-          animate={{ opacity: 1, x: 0 }}
-          className="lg:col-span-1"
+      {/* Big Trigger Button for the whole team */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.05 }}
+        className="mb-6"
+      >
+        <button
+          onClick={runAgentTeam}
+          disabled={cronLoading}
+          className="w-full px-10 py-6 rounded-2xl bg-gradient-to-r from-emerald-500 to-green-600 text-white font-semibold text-lg shadow-lg shadow-emerald-600/20 hover:from-emerald-400 hover:to-green-500 disabled:opacity-60 transition flex items-center justify-center gap-3"
         >
-          <div className="rounded-2xl bg-gradient-to-b from-brand-gray3/80 to-brand-gray4 p-1 shadow-glow">
-            <div className="rounded-2xl bg-brand-gray4 p-5">
-              <h2 className="text-xl font-medium mb-4">Control Panel</h2>
-              
-              {/* Prompt Input */}
-              <div className="mb-4">
-                <label className="block text-sm font-medium text-zinc-300 mb-2">
-                  Prompt
-                </label>
-                <textarea
-                  value={prompt}
-                  onChange={(e) => setPrompt(e.target.value)}
-                  disabled={isRunning}
-                  className="w-full h-24 px-3 py-2 bg-brand-gray3 border border-white/10 rounded-lg text-white placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-brand-blue/50 disabled:opacity-50 disabled:cursor-not-allowed resize-none"
-                  placeholder="Enter your prompt here..."
-                />
-              </div>
+          {cronLoading ? (
+            <>
+              <div className="w-6 h-6 border-3 border-white/30 border-t-white rounded-full animate-spin" />
+              RUNNING…
+            </>
+          ) : (
+            <>
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14M12 5l7 7-7 7" />
+              </svg>
+              RUN AGENT TEAM
+            </>
+          )}
+        </button>
+        {cronMessage && (
+          <div className="mt-3 text-sm text-zinc-300">{cronMessage}</div>
+        )}
+      </motion.div>
 
-              {/* Max Rounds Input */}
-              <div className="mb-6">
-                <label className="block text-sm font-medium text-zinc-300 mb-2">
-                  Max Rounds
-                </label>
-                <input
-                  type="number"
-                  value={maxRounds}
-                  onChange={(e) => setMaxRounds(parseInt(e.target.value) || 8)}
-                  disabled={isRunning}
-                  min="1"
-                  max="20"
-                  className="w-full px-3 py-2 bg-brand-gray3 border border-white/10 rounded-lg text-white placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-brand-blue/50 disabled:opacity-50 disabled:cursor-not-allowed"
-                />
-              </div>
-
-              {/* Run Button */}
-              <button
-                onClick={startAgentRun}
-                disabled={isRunning || !prompt.trim()}
-                className="w-full px-4 py-3 bg-brand-blue hover:bg-brand-blue/80 disabled:bg-brand-blue/30 disabled:cursor-not-allowed text-white font-medium rounded-lg transition-colors duration-200 flex items-center justify-center gap-2"
-              >
-                {isRunning ? (
-                  <>
-                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                    Running...
-                  </>
-                ) : (
-                  <>
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.828 14.828a4 4 0 01-5.656 0M9 10h1m4 0h1m-6 4h1m4 0h1m6-4a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                    Start Agent Run
-                  </>
-                )}
-              </button>
-
-              {/* Run Info */}
-              {runId && (
-                <div className="mt-4 p-3 bg-brand-gray3/50 rounded-lg">
-                  <div className="text-xs text-zinc-400 mb-1">Run ID</div>
-                  <div className="text-sm font-mono text-zinc-200 break-all">{runId}</div>
-                </div>
-              )}
-            </div>
-          </div>
-        </motion.div>
-
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Events Panel */}
         <motion.div
           initial={{ opacity: 0, x: 20 }}
           animate={{ opacity: 1, x: 0 }}
-          className="lg:col-span-2"
+          className="lg:col-span-3"
         >
           <div className="rounded-2xl bg-gradient-to-b from-brand-gray3/80 to-brand-gray4 p-1 shadow-glow">
             <div className="rounded-2xl bg-brand-gray4 p-5">

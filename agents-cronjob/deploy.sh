@@ -37,6 +37,8 @@ gcloud run deploy "${SERVICE_NAME}" \
   --max-instances "1" \
   --set-env-vars "AGENTS_SERVICE_URL=https://adgen-agents-710876076445.us-central1.run.app" \
   --set-env-vars "AGENTS_API_TOKEN=change-me" \
+  --set-env-vars "WEBHOOK_URL=https://adgen-webapp-710876076445.us-central1.run.app/api/agent-events" \
+  --set-env-vars "WEBHOOK_SECRET=change-me" \
 
 echo "Deployed ${SERVICE_NAME} to ${REGION} in project ${PROJECT_ID}"
 echo "Configuring Cloud Scheduler to invoke this service hourly..."

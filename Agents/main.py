@@ -77,6 +77,7 @@ from MasterAgent.agent import root_agent
 from google.adk.runners import InMemoryRunner
 from google.adk.agents.run_config import RunConfig
 from google.genai import types
+from google.genai.errors import ClientError  # type: ignore
 from webhook import report_progress
 
 # Configure logging
@@ -119,7 +120,54 @@ def extract_status(obj) -> Optional[str]:
     return None
 
 
-async def run_agent_with_rollover(prompt: str, max_rounds: int = 8, run_id: Optional[str] = None) -> dict:
+def _wrap_segmentation_prompt(user_prompt: str) -> str:
+    """
+    Add strict guard-rails for the segmentation phase so the agent does only the needed calls
+    and returns a minimal JSON status.
+    """
+    return (
+        "You are the MasterAgent coordinating a segmentation workflow.\n"
+        "Follow these strict rules:\n"
+        "1) First, call read_users_to_segmentate. If it returns status='no_pending_users', "
+        "IMMEDIATELY return {\"status\":\"segmentation_finished\"}.\n"
+        "2) Otherwise, process up to 5 users by calling write_user_segmentation_result for each.\n"
+        "3) Do NOT call retrieve_user_activity_counts, compare_event_counts, or write_user_activity_to_firestore in this phase.\n"
+        "4) Let remaining = pending_total - processed_count. "
+        "If remaining > 0 then return {\"status\":\"continue\"} else return {\"status\":\"segmentation_finished\"}.\n"
+        "Output ONLY the minimal JSON object with the status. No extra words.\n\n"
+        f"Task: {user_prompt}"
+    )
+
+def _wrap_creative_prompt(user_prompt: str) -> str:
+    """
+    Guard-rails for the creative/content phase, ensuring it writes outputs and terminates.
+    """
+    return (
+        "You are now in the CREATIVE CONTENT phase for ecommerce marketing.\n"
+        "Follow this exact plan with the listed tools and then STOP:\n"
+        "STEP 1 — DATA PREP (DataAnalyticAgent):\n"
+        "  • Call write_segmentation_location_pairs_to_firestore() to upsert\n"
+        "    'segmentations/<segmentation>_<city>_<country>' docs (imageUrl may be empty).\n"
+        "STEP 2 — CONTENT QUEUE (CreativeAgent):\n"
+        "  • Call read_segmentations_to_generate() to fetch items with empty imageUrl.\n"
+        "STEP 3 — GENERATION (CreativeAgent):\n"
+        "  • For EACH returned item, generate ONE marketing image via create_marketing_image()\n"
+        "    using a 16:9 aspect ratio and 1024 size (or defaults in the tool), passing a meaningful\n"
+        "    name (e.g. '<segmentation>_<city>_<country>').\n"
+        "  • If the batch variant is used, ensure doc_id/name is preserved so the image URL is written\n"
+        "    back to Firestore under 'segmentations/<doc_id>.imageUrl'.\n"
+        "CONSTRAINTS:\n"
+        "  • Do not run extra analytics in this phase. Focus only on the steps above.\n"
+        "  • Save outputs to Google Cloud Storage using provided tools.\n"
+        "FINAL RETURN (STRICT):\n"
+        "  • After you finish generating images for all pending items, return ONLY:\n"
+        "      {\"status\":\"flow_finished\"}\n"
+        "  • On fatal error, return ONLY: {\"status\":\"failed\"}\n\n"
+        f"Task: {user_prompt}"
+    )
+
+
+async def run_agent_with_rollover(prompt: str, max_rounds: int = 8, run_id: Optional[str] = None, prefer_api: bool = False) -> dict:
     """
     Run the master agent with session rollover.
     Uses agent cloning for fresh sessions to avoid context pollution.
@@ -140,8 +188,8 @@ async def run_agent_with_rollover(prompt: str, max_rounds: int = 8, run_id: Opti
         report_progress(run_id=run_id, agent="MasterAgent", status="progress", message=f"Round {rounds} started", step=str(rounds))
         logger.info(f"🟧🟧🟧 REPORTING PROGRESS TEST")
         
-        # Create fresh session for each round
-        session_id = f"http-{uuid.uuid4().hex[:8]}"
+        # Create fresh session for each round (high-entropy to avoid colisions)
+        session_id = f"http-{(run_id or 'rnd')[:8]}-{rounds}-{uuid.uuid4().hex[:6]}"
         user_id = "http-user"
         logger.info(f"Round {rounds} session_id={session_id}")
         last_text: Optional[str] = None
@@ -161,36 +209,79 @@ async def run_agent_with_rollover(prompt: str, max_rounds: int = 8, run_id: Opti
                 "imagen",
             ]
         )
-        if not is_content_task:
+        # Prefer Google AI API (API key) when requested or for non-content tasks
+        if prefer_api or not is_content_task:
             original_project = os.environ.pop("GOOGLE_CLOUD_PROJECT", None)
             original_location = os.environ.pop("GOOGLE_CLOUD_LOCATION", None)
             if os.getenv("GOOGLE_API_KEY") and not os.getenv("GOOGLE_GENAI_API_KEY"):
                 os.environ["GOOGLE_GENAI_API_KEY"] = os.environ["GOOGLE_API_KEY"]
 
-        try:
+        async def _run_once() -> Optional[str]:
+            nonlocal session_id
+            txt: Optional[str] = None
             async with InMemoryRunner(agent=agent_instance, app_name="agents") as runner:
-                new_message = types.Content(parts=[types.Part(text=current_prompt)], role="user")
-                
-                # Create session
+                # Build guarded prompt based on phase
+                eff_prompt = _wrap_creative_prompt(current_prompt) if is_content_task else _wrap_segmentation_prompt(current_prompt)
+                logger.info(f"🧭 Using prompt wrapper: {'creative' if is_content_task else 'segmentation'}")
+                new_message = types.Content(parts=[types.Part(text=eff_prompt)], role="user")
+                # Ensure session exists
                 await runner.session_service.create_session(
                     app_name=runner.app_name,
                     user_id=user_id,
                     session_id=session_id
                 )
-                
-                # Run agent
-                async for event in runner.run_async(
-                    user_id=user_id,
-                    session_id=session_id,
-                    new_message=new_message,
-                    run_config=RunConfig(max_llm_calls=30),
-                ):
-                    # Capture agent response
-                    if event.content and event.content.parts:
-                        for part in event.content.parts:
-                            if getattr(part, "text", None):
-                                last_text = part.text
+                try:
+                    async for event in runner.run_async(
+                        user_id=user_id,
+                        session_id=session_id,
+                        new_message=new_message,
+                        run_config=RunConfig(max_llm_calls=30),
+                    ):
+                        if event.content and event.content.parts:
+                            for part in event.content.parts:
+                                if getattr(part, "text", None):
+                                    if part.text:
+                                        txt = part.text
+                finally:
+                    # Best-effort session cleanup
+                    try:
+                        await runner.session_service.delete_session(
+                            app_name=runner.app_name,
+                            user_id=user_id,
+                            session_id=session_id
+                        )
+                    except Exception:
+                        pass
+            return txt
         
+        # Try once; if Vertex rate limits (429) and we weren't already preferring API, retry once via API key
+        try:
+            last_text = await _run_once()
+        except ClientError as ce:  # type: ignore
+            if getattr(ce, "status_code", None) == 429 and not (prefer_api or is_content_task):
+                logger.warning("Vertex 429 Resource exhausted. Retrying this round with API key path.")
+                # Temporarily drop Vertex hints and map API key
+                tmp_project = os.environ.pop("GOOGLE_CLOUD_PROJECT", None)
+                tmp_location = os.environ.pop("GOOGLE_CLOUD_LOCATION", None)
+                if os.getenv("GOOGLE_API_KEY") and not os.getenv("GOOGLE_GENAI_API_KEY"):
+                    os.environ["GOOGLE_GENAI_API_KEY"] = os.getenv("GOOGLE_API_KEY", "")
+                try:
+                    last_text = await _run_once()
+                finally:
+                    # Restore original env to avoid impacting next rounds
+                    if tmp_project is not None:
+                        os.environ["GOOGLE_CLOUD_PROJECT"] = tmp_project
+                    if tmp_location is not None:
+                        os.environ["GOOGLE_CLOUD_LOCATION"] = tmp_location
+            else:
+                logger.error(f"❌ Error in round {rounds}: {ce}", exc_info=True)
+                report_progress(run_id=run_id, agent="MasterAgent", status="error", message=str(ce), step=str(rounds))
+                return {
+                    "error": str(ce),
+                    "rounds": rounds,
+                    "statuses": statuses,
+                    "success": False
+                }
         except Exception as e:
             logger.error(f"❌ Error in round {rounds}: {e}", exc_info=True)
             report_progress(run_id=run_id, agent="MasterAgent", status="error", message=str(e), step=str(rounds))
@@ -230,17 +321,8 @@ async def run_agent_with_rollover(prompt: str, max_rounds: int = 8, run_id: Opti
                 logger.warning(f"⚠️ Failed to clone agent; falling back to root_agent. err={e}")
                 agent_instance = getattr(root_agent, "clone", lambda: root_agent)()
             
-            # Keep the continuation prompt precise to avoid extra model calls
-            current_prompt = (
-                'Continue the user segmentation task. '
-                'Start by calling read_users_to_segmentate. If it returns status="no_pending_users", '
-                'IMMEDIATELY return {"status":"segmentation_finished"} with no further calls. '
-                'Do NOT call retrieve_user_activity_counts, compare_event_counts, or write_user_activity_to_firestore. '
-                'Only process up to 5 pending users by calling write_user_segmentation_result for each. '
-                'Then decide: let remaining = pending_total - 5. '
-                'If remaining > 0 return {"status":"continue"} else return {"status":"segmentation_finished"}. '
-                'Return only the minimal JSON. Do not produce any extra text.'
-            )
+            # Keep the continuation prompt concise with the same guard-rails
+            current_prompt = "Continue segmentation from the last point."
             continue
         
         break
@@ -301,6 +383,15 @@ def run_agent():
         prompt = data['prompt']
         max_rounds = data.get('max_rounds', 8)
         run_id = data.get('run_id') or request.headers.get('X-Run-Id') or f"http-{uuid.uuid4().hex[:8]}"
+        # Prefer API flag can be passed via JSON or header
+        prefer_api = False
+        try:
+            prefer_api = bool(data.get('prefer_api'))
+        except Exception:
+            prefer_api = False
+        header_prefer = (request.headers.get('X-Prefer-Api') or "").strip().lower()
+        if header_prefer in ("1", "true", "yes"):
+            prefer_api = True
         
         # Set webhook environment variables if provided in request
         webhook_url = data.get('webhook_url')
@@ -312,15 +403,75 @@ def run_agent():
             os.environ['WEBHOOK_SECRET'] = webhook_secret
             logger.info(f"🔑 Webhook secret configured")
         
-        logger.info(f"📥 Received request: prompt='{prompt[:50]}...', max_rounds={max_rounds}, run_id={run_id}")
+        logger.info(f"📥 Received request: prompt='{prompt[:50]}...', max_rounds={max_rounds}, run_id={run_id}, prefer_api={prefer_api}")
         
-        # Run agent asynchronously
-        result = asyncio.run(run_agent_with_rollover(prompt, max_rounds, run_id=run_id))
+        # Helper to parse status safely
+        def _extract_status_from_result(res_obj) -> str:
+            try:
+                if isinstance(res_obj, dict):
+                    status_val = str(res_obj.get("status") or "")
+                    return status_val
+                if isinstance(res_obj, str):
+                    parsed = json.loads(res_obj)
+                    if isinstance(parsed, dict):
+                        return str(parsed.get("status") or "")
+            except Exception:
+                return ""
+            return ""
         
-        logger.info(f"📤 Request completed: rounds={result.get('rounds')}, success={result.get('success')}")
+        # First run
+        logger.info(f"🚀 Starting primary run (prefer_api={prefer_api})")
+        result = asyncio.run(run_agent_with_rollover(prompt, max_rounds, run_id=run_id, prefer_api=prefer_api))
+        logger.info(f"📤 Primary run completed: rounds={result.get('rounds')}, success={result.get('success')}")
         
+        statuses = list(result.get("statuses") or [])
+        last_status = _extract_status_from_result(result.get("result"))
+        followups: list[dict] = []
+        logger.info(f"🔎 Extracted status='{last_status or 'n/a'}' from primary run")
+        
+        # Resolve follow-ups similarly to cronjob: continue -> continue prompt; segmentation_finished -> creative prompt
+        max_depth = 8
+        depth = 0
+        while depth < max_depth:
+            s = (last_status or "").strip().lower()
+            if not s:
+                break
+            if s == "continue":
+                depth += 1
+                cont_prompt = "Continue your segmentation task starting from reading_users_to_segmentate step"
+                logger.info(f"🔄 Follow-up {depth}: sending continue prompt")
+                fu = asyncio.run(run_agent_with_rollover(cont_prompt, max_rounds=4, run_id=run_id, prefer_api=True))
+                followups.append({"prompt": cont_prompt, "result": fu.get("result"), "rounds": fu.get("rounds")})
+                statuses.extend(fu.get("statuses") or [])
+                last_status = _extract_status_from_result(fu.get("result"))
+                logger.info(f"🔎 Follow-up {depth} status='{last_status or 'n/a'}'")
+                continue
+            if s == "segmentation_finished":
+                depth += 1
+                creative_prompt = "Write location segmentation pairs to firestore and do your content creation task for ecommerce"
+                logger.info(f"🎨 Triggering creative content step (follow-up {depth})")
+                report_progress(run_id=run_id, agent="MasterAgent", status="progress", message="Starting creative content step", step=f"creative_{depth}")
+                fu = asyncio.run(run_agent_with_rollover(creative_prompt, max_rounds=4, run_id=run_id, prefer_api=False))
+                followups.append({"prompt": creative_prompt, "result": fu.get("result"), "rounds": fu.get("rounds")})
+                statuses.extend(fu.get("statuses") or [])
+                last_status = _extract_status_from_result(fu.get("result"))
+                logger.info(f"🖼️ Creative step status='{last_status or 'n/a'}'")
+                # Continue resolving until terminal
+                continue
+            # Terminal statuses
+            if s in ("flow_finished", "finished", "error", "failed", "no_pending", "no_pending_users"):
+                break
+            # Unrecognized -> stop
+            break
+        
+        final = {
+            **result,
+            "followups": followups,
+            "statuses": statuses,
+            "final_status": last_status or None,
+        }
         report_progress(run_id=run_id, agent="MasterAgent", status="completed", message="Run completed")
-        return jsonify(result), 200
+        return jsonify(final), 200
         
     except Exception as e:
         logger.error(f"❌ Error processing request: {e}", exc_info=True)

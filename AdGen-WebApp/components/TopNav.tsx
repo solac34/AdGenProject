@@ -7,10 +7,7 @@ export default function TopNav() {
   const pathname = usePathname();
   const items = [
     { href: "/", label: "Dashboard" },
-    { href: "/agent-runner", label: "Agent Runner" },
-    { href: "/settings", label: "Agent Settings" },
-    { href: "/segmentations", label: "Segmentations" },
-    { href: "/populate-data", label: "Populate Data" }
+    { href: "/agent-runner", label: "Agent Runner" }
   ];
   const index =
     items.findIndex((i) => i.href === pathname || (i.href !== "/" && pathname.startsWith(i.href))) ?? 0;

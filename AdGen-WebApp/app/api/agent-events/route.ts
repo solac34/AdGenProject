@@ -21,6 +21,17 @@ type StoredEvent = {
   receivedAt: number;
 };
 
+// Canonical UI event (strict shape expected by frontend)
+type UiEvent = {
+  id: string;
+  agent: string;
+  status: string;
+  message: string;
+  step: string | number | null;
+  timestamp: number;
+  receivedAt: number;
+};
+
 // In-memory event store (per server instance)
 // Map: runId -> array of events
 const eventStore: Map<string, StoredEvent[]> = new Map();
@@ -33,7 +44,17 @@ function publish(runId: string, evt: any) {
   if (!set) return;
   for (const send of set) {
     try {
-      send(evt);
+      // Ensure we publish only the canonical UI shape
+      const uiEvt: UiEvent = {
+        id: String(evt?.id || `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`),
+        agent: String(evt?.agent || 'unknown'),
+        status: String(evt?.status || 'info'),
+        message: String(evt?.message || ''),
+        step: (evt?.step ?? null) as string | number | null,
+        timestamp: Number(evt?.timestamp || Date.now()),
+        receivedAt: Number(evt?.receivedAt || Date.now()),
+      };
+      send(uiEvt);
     } catch {
       // ignore
     }
@@ -105,41 +126,70 @@ export async function GET(req: NextRequest) {
 
   // Server-Sent Events stream for live updates
   if (sse) {
+    const abortSignal = req.signal;
     const stream = new ReadableStream({
       start(controller) {
         const encoder = new TextEncoder();
+        let closed = false;
+
+        const safeEnqueue = (chunk: Uint8Array) => {
+          if (closed) return;
+          try {
+            controller.enqueue(chunk);
+          } catch {
+            // Controller likely closed; trigger cleanup
+            cleanup();
+          }
+        };
+
         function send(evt: any) {
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify(evt)}\n\n`));
+          safeEnqueue(encoder.encode(`data: ${JSON.stringify(evt)}\n\n`));
         }
-        // Register subscriber
+
         const set = subscribers.get(runId) || new Set();
         set.add(send);
         subscribers.set(runId, set);
-        
+
         console.log(`[agent-events SSE] Client connected for runId: ${runId}, total subscribers: ${set.size}`);
-        
-        // Heartbeat
+
         const hb = setInterval(() => {
-          controller.enqueue(encoder.encode(`: ping\n\n`));
+          safeEnqueue(encoder.encode(`: ping\n\n`));
         }, 15000);
-        
-        // Cleanup
-        // @ts-ignore
-        controller._onClose = () => {
+
+        const cleanup = () => {
+          if (closed) return;
+          closed = true;
           clearInterval(hb);
           const current = subscribers.get(runId);
           if (current) {
             current.delete(send);
-            if (current.size === 0) {
-              subscribers.delete(runId);
-            }
-            console.log(`[agent-events SSE] Client disconnected for runId: ${runId}, remaining subscribers: ${current.size}`);
+            if (current.size === 0) subscribers.delete(runId);
           }
+          try {
+            // Closing the stream signals the client
+            controller.close();
+          } catch {}
+          const remaining = subscribers.get(runId)?.size || 0;
+          console.log(`[agent-events SSE] Client disconnected for runId: ${runId}, remaining subscribers: ${remaining}`);
         };
-      },
-      cancel() {
+
+        // Attach cleanup so cancel() can call it
         // @ts-ignore
-        if (typeof (this as any)._onClose === 'function') (this as any)._onClose();
+        (controller as any)._cleanup = cleanup;
+
+        // If client disconnects, Next.js signals via req.signal
+        try {
+          if (abortSignal && typeof abortSignal.addEventListener === 'function') {
+            abortSignal.addEventListener('abort', cleanup, { once: true } as any);
+          }
+        } catch {}
+      },
+      cancel(reason) {
+        try {
+          // @ts-ignore
+          const cleanup = (this as any)._cleanup as (() => void) | undefined;
+          if (typeof cleanup === 'function') cleanup();
+        } catch {}
       }
     });
     return new Response(stream, {
@@ -148,16 +198,25 @@ export async function GET(req: NextRequest) {
         'Cache-Control': 'no-cache, no-transform',
         Connection: 'keep-alive',
         'X-Accel-Buffering': 'no',
+        'Cache-Tag': 'sse',
       },
     });
   }
 
-  // Regular GET: return stored events
+  // Regular GET: return stored events (canonical UI shape)
   const events = eventStore.get(runId) || [];
-  const limitedEvents = events.slice(-limitNum); // Get last N events
-  
+  const limitedEvents = events.slice(-limitNum).map((e): UiEvent => ({
+    id: String(e.id),
+    agent: String(e.agent || 'unknown'),
+    status: String(e.status || 'info'),
+    message: String(e.message || ''),
+    step: (e.step ?? null) as string | number | null,
+    timestamp: Number(e.timestamp || Date.now()),
+    receivedAt: Number(e.receivedAt || Date.now()),
+  }));
+
   console.log(`[agent-events GET] Returning ${limitedEvents.length} events for runId: ${runId} (total: ${events.length})`);
-  
+
   return Response.json({ items: limitedEvents });
 }
 

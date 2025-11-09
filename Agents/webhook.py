@@ -4,9 +4,6 @@ from typing import Any, Dict, Optional
 
 import requests
 
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")
-WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET")
-
 
 def report_progress(
     *,
@@ -22,7 +19,11 @@ def report_progress(
     Send a progress event to the WebApp webhook. 
     Non-blocking best-effort; failures are swallowed.
     """
-    if not WEBHOOK_URL or not WEBHOOK_SECRET:
+    # Read env vars dynamically so they can be updated at runtime
+    webhook_url = os.getenv("WEBHOOK_URL")
+    webhook_secret = os.getenv("WEBHOOK_SECRET")
+    
+    if not webhook_url or not webhook_secret:
         return False
     payload = {
         "runId": run_id,
@@ -35,10 +36,10 @@ def report_progress(
     }
     headers = {
         "Content-Type": "application/json",
-        "x-webhook-secret": WEBHOOK_SECRET,
+        "x-webhook-secret": webhook_secret,
     }
     try:
-        requests.post(WEBHOOK_URL, json=payload, headers=headers, timeout=timeout)
+        requests.post(webhook_url, json=payload, headers=headers, timeout=timeout)
         print(f"🛑🛑🛑 WEBHOOK REPORTED: {run_id} {agent} {status} {message} {step}")
 
         return True
