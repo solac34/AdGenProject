@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { spawn } from "child_process";
+import path from "path";
 
 export const runtime = "nodejs";
 
@@ -17,8 +18,8 @@ export async function POST(request: Request) {
 
     // Run the seed script that lives inside this project
     const cwd = process.cwd(); // adg-ecommerce root in this service/container
-    const child = spawn("node", ["scripts/seedMega.js"], {
-      cwd,
+    const scriptPath = path.join(cwd, "scripts", "seedMega.js");
+    const child = spawn(process.execPath, [scriptPath], {
       env: {
         ...process.env,
         SEED_TOTAL_USERS: String(totalUsers ?? ""),
