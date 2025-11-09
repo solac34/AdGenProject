@@ -18,6 +18,10 @@ REGION="us-central1"
 SERVICE_NAME="adgen-agents"
 IMAGE_NAME="gcr.io/${PROJECT_ID}/${SERVICE_NAME}"
 
+WEBAPP_BASE_URL="${WEBAPP_BASE_URL:-https://adgen-webapp-gcojamrsfq-uc.a.run.app}"
+WEBHOOK_URL="${WEBHOOK_URL:-${WEBAPP_BASE_URL}/api/agent-events}"
+WEBHOOK_SECRET="${WEBHOOK_SECRET:-change-me}"
+AGENTS_API_TOKEN="${AGENTS_API_TOKEN:-change-me}"
 echo -e "${BLUE}🚀 AdGen Agents Cloud Run Deployment${NC}"
 echo "=========================================="
 echo -e "${GREEN}📡 HTTP API with InMemoryRunner${NC}"
@@ -71,7 +75,10 @@ gcloud run deploy $SERVICE_NAME \
     --set-env-vars="GOOGLE_GENAI_USE_VERTEXAI=True" \
     --set-env-vars="BQ_DATASET=adgen_bq" \
     --set-env-vars="BQ_LOCATION=US" \
-    --set-env-vars="FIRESTORE_DATABASE=(default)"
+    --set-env-vars="FIRESTORE_DATABASE=(default)" \
+    --set-env-vars="WEBHOOK_URL=${WEBHOOK_URL}" \
+    --set-env-vars="WEBHOOK_SECRET=${WEBHOOK_SECRET}" \
+    --set-env-vars="AGENTS_API_TOKEN=${AGENTS_API_TOKEN}"
 
 # Get the service URL
 SERVICE_URL=$(gcloud run services describe $SERVICE_NAME \

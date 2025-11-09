@@ -96,11 +96,28 @@ export default function HomePage() {
               if (isRunning) return;
               setIsRunning(true);
               try {
+                console.log('🚀 Starting agent run...');
                 const res = await fetch('/api/run', { method: 'POST' });
-                const data = (await res.json()) as { runId: string };
+                const data = (await res.json()) as { 
+                  runId: string; 
+                  forwarded?: boolean; 
+                  error?: string;
+                  agentsUrl?: string;
+                };
+                
+                console.log('📊 Agent run response:', data);
+                console.log('🆔 Setting runId:', data.runId);
                 setRunId(data.runId);
-              } catch {
-                setRunId(Math.random().toString(36).slice(2));
+                
+                if (!data.forwarded) {
+                  console.warn('⚠️ Request not forwarded to agents service:', data.error || 'Unknown reason');
+                } else {
+                  console.log('✅ Agent run initiated successfully');
+                  console.log('🔄 EventFeed should start polling for runId:', data.runId);
+                }
+              } catch (error) {
+                console.error('❌ Failed to start agent run:', error);
+                setRunId(`error-${Date.now()}`);
               }
             }}
           />
