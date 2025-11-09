@@ -33,7 +33,8 @@ def cronjob(request):
     """
 
     try:
-        run_url = _build_run_url("https://adgen-agents-710876076445.us-central1.run.app") # url is agents url
+        agents_service_url = os.getenv("AGENTS_SERVICE_URL", "https://adgen-agents-710876076445.us-central1.run.app")
+        run_url = _build_run_url(agents_service_url)
 
         # NOTE: Avoid trailing comma (tuple); ensure prompt is a string
         prompt = "Do your segmentation task."

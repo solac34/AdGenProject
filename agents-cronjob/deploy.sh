@@ -29,6 +29,8 @@ gcloud run deploy "${SERVICE_NAME}" \
   --source . \
   --region "${REGION}" \
   --allow-unauthenticated \
+  --clear-base-image \
+  --set-env-vars "AGENTS_SERVICE_URL=https://adgen-agents-710876076445.us-central1.run.app" \
 
 echo "Deployed ${SERVICE_NAME} to ${REGION} in project ${PROJECT_ID}"
 echo "Configuring Cloud Scheduler to invoke this service hourly..."
