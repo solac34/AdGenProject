@@ -30,20 +30,35 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Authenticate to Google Cloud
-        id: auth
+      # Prefer Workload Identity Federation if configured. Otherwise fall back to a JSON key.
+      - name: Authenticate to Google Cloud via Workload Identity
+        if: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER != '' && secrets.GCP_SERVICE_ACCOUNT != '' }}
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Authenticate to Google Cloud via Service Account Key
+        if: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER == '' && secrets.GCP_SA_KEY != '' }}
         uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Fail if no auth method configured
+        if: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER == '' && secrets.GCP_SA_KEY == '' }}
+        run: |
+          echo "::error::No Google Cloud auth configured. Set either:
+            - secrets.GCP_WORKLOAD_IDENTITY_PROVIDER and secrets.GCP_SERVICE_ACCOUNT (recommended), or
+            - secrets.GCP_SA_KEY (JSON key)."
+          exit 1
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
         with:
           project_id: ${{ env.GCP_PROJECT_ID }}
 
-      - name: Activate gcloud account (for gcloud auth list check)
-        run: |
-          gcloud auth activate-service-account --key-file="${{ steps.auth.outputs.credentials_file_path }}"
+      - name: Verify gcloud auth
+        run: gcloud auth list
 
       - name: Deploy adg-ecommerce
         working-directory: adg-ecommerce
