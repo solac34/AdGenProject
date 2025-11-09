@@ -10,6 +10,9 @@ ENV PYTHONWARNINGS=ignore::UserWarning
 # Create app directory
 WORKDIR /app
 
+# echo the working directory
+RUN echo $WORKDIR
+
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
     gcc \

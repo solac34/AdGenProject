@@ -37,12 +37,17 @@ export default function InstructionCard({ docId, title }: { docId: string; title
     setLoading(true);
     fetch(`/api/instructions/${encodeURIComponent(docId)}`)
       .then(async (r) => {
+        const data = await r.json();
         if (!r.ok) throw new Error(`status_${r.status}`);
-        return r.json();
+        return data;
       })
       .then((d) => {
         if (!mounted) return;
+        // Always show the instruction, even if it's empty (Firestore might be down)
         setText(d?.instruction || "");
+        if (d?._firestoreError) {
+          console.warn(`[InstructionCard] Firestore error for ${docId}, showing empty data`);
+        }
       })
       .catch((e) => {
         if (!mounted) return;

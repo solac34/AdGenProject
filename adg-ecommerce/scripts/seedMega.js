@@ -21,7 +21,7 @@ const DATASET = process.env.BQ_DATASET || 'adgen_bq';
 const EVENTS_TABLE = process.env.BQ_EVENTS_TABLE || 'user_events';
 const ORDERS_TABLE = process.env.BQ_ORDERS_TABLE || 'user_orders';
 
-const KEYFILE = process.env.GOOGLE_APPLICATION_CREDENTIALS || process.env.BQ_KEYFILE || './eighth-upgrade-475017-u5-95fdc326baca.json';
+const KEYFILE = process.env.GOOGLE_APPLICATION_CREDENTIALS || process.env.BQ_KEYFILE || '../eighth-upgrade-475017-u5-95fdc326baca.json';
 const SA_JSON = process.env.GCP_SERVICE_ACCOUNT_JSON;
 
 // ============= CONFIGURATION =============
@@ -120,7 +120,7 @@ const EU_CITIES = [
 
 const OTHER_CITIES = [
   { city: 'Istanbul', country: 'Türkiye' },
-  {city: 'Eskisehir', country: 'Türkiye'},
+  { city: 'Eskisehir', country: 'Türkiye' },
   { city: 'Tokyo', country: 'Japan' },
   { city: 'Sydney', country: 'Australia' },
   { city: 'Toronto', country: 'Canada' },

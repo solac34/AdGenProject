@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { ResponsiveContainer, AreaChart, Area } from 'recharts';
+import EventFeed from './EventFeed';
 
 type Step = {
   key: string;
@@ -82,9 +83,7 @@ export default function RunStatusPanel({ runId, onComplete }: { runId: string | 
         </ResponsiveContainer>
       </div>
 
-      <div className="text-xs text-zinc-400">
-        Live status updates simulated for demo. Replace with Cloud Run events stream.
-      </div>
+      <EventFeed runId={runId} />
     </div>
   );
 }
