@@ -106,12 +106,14 @@ export default function HomePage() {
                 };
                 
                 console.log('📊 Agent run response:', data);
+                console.log('🆔 Setting runId:', data.runId);
                 setRunId(data.runId);
                 
                 if (!data.forwarded) {
                   console.warn('⚠️ Request not forwarded to agents service:', data.error || 'Unknown reason');
                 } else {
                   console.log('✅ Agent run initiated successfully');
+                  console.log('🔄 EventFeed should start polling for runId:', data.runId);
                 }
               } catch (error) {
                 console.error('❌ Failed to start agent run:', error);

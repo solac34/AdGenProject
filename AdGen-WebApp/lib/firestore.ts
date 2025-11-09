@@ -13,7 +13,7 @@ class MockFirestore {
   collection(name: string) {
     return {
       doc: (id: string) => ({
-        get: async () => ({ 
+        get: async () => ({
           exists: false,
           data: () => null
         }),
@@ -22,37 +22,49 @@ class MockFirestore {
           add: async () => ({ id: `mock-${Date.now()}` }),
           orderBy: () => ({
             limit: () => ({
-              get: async () => ({ docs: [] })
+              get: async () => ({
+                docs: [] as Array<{ id: string; data: () => Record<string, unknown> }>
+              })
             })
           }),
           limit: () => ({
-            get: async () => ({ docs: [] })
+            get: async () => ({
+              docs: [] as Array<{ id: string; data: () => Record<string, unknown> }>
+            })
           }),
-          get: async () => ({ docs: [] })
+          get: async () => ({
+            docs: [] as Array<{ id: string; data: () => Record<string, unknown> }>
+          })
         })
       }),
       add: async () => ({ id: `mock-${Date.now()}` }),
       orderBy: () => ({
         limit: () => ({
-          get: async () => ({ docs: [] })
+          get: async () => ({
+            docs: [] as Array<{ id: string; data: () => Record<string, unknown> }>
+          })
         })
       }),
       limit: () => ({
-        get: async () => ({ docs: [] })
+        get: async () => ({
+          docs: [] as Array<{ id: string; data: () => Record<string, unknown> }>
+        })
       }),
-      get: async () => ({ docs: [] })
+      get: async () => ({
+        docs: [] as Array<{ id: string; data: () => Record<string, unknown> }>
+      })
     };
   }
 }
 
-export function getFirestore(): Firestore | MockFirestore {
+export function getFirestore(): any {
   if (firestoreInstance) {
     return firestoreInstance;
   }
 
-  // In development, if no credentials are available, use mock
-  if (isDevMode && !SA_JSON && !KEYFILE) {
-    console.warn("[Firestore] Development mode: Using mock Firestore (no credentials configured)");
+  // Always use mock in development, and also in production if no credentials
+  if (isDevMode || (!SA_JSON && !KEYFILE)) {
+    console.warn("[Firestore] Using mock Firestore (no credentials configured or dev mode)");
     return new MockFirestore() as any;
   }
 
@@ -66,29 +78,19 @@ export function getFirestore(): Firestore | MockFirestore {
       firestoreInstance = new Firestore({ projectId: PROJECT_ID, databaseId: DATABASE_ID, keyFilename: KEYFILE });
     } else {
       // Try application default credentials
-      firestoreInstance = new Firestore({ 
-        projectId: PROJECT_ID, 
+      firestoreInstance = new Firestore({
+        projectId: PROJECT_ID,
         databaseId: DATABASE_ID,
         ignoreUndefinedProperties: true
       });
     }
-    
+
     return firestoreInstance;
   } catch (error) {
-    console.warn("[Firestore] Failed to initialize, using mock in development:", error);
-    
-    // In development, return mock instead of throwing
-    if (isDevMode) {
-      return new MockFirestore() as any;
-    }
-    
-    // In production, still try basic configuration
-    firestoreInstance = new Firestore({ 
-      projectId: PROJECT_ID, 
-      databaseId: DATABASE_ID,
-      ignoreUndefinedProperties: true
-    });
-    return firestoreInstance;
+    console.warn("[Firestore] Failed to initialize, using mock:", error);
+
+    // Always return mock instead of throwing (both dev and prod)
+    return new MockFirestore() as any;
   }
 }
 

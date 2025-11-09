@@ -135,6 +135,7 @@ async def run_agent_with_rollover(prompt: str, max_rounds: int = 8, run_id: Opti
         rounds += 1
         logger.info(f"🔄 Agent round {rounds}/{max_rounds}")
         report_progress(run_id=run_id, agent="MasterAgent", status="progress", message=f"Round {rounds} started", step=str(rounds))
+        logger.info(f"🟧🟧🟧 REPORTING PROGRESS TEST")
         
         # Create fresh session for each round
         session_id = f"http-{uuid.uuid4().hex[:8]}"

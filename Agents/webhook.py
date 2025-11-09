@@ -39,6 +39,8 @@ def report_progress(
     }
     try:
         requests.post(WEBHOOK_URL, json=payload, headers=headers, timeout=timeout)
+        print(f"🛑🛑🛑 WEBHOOK REPORTED: {run_id} {agent} {status} {message} {step}")
+
         return True
     except Exception:
         return False

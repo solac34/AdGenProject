@@ -44,17 +44,22 @@ export default function InstructionEditor({
     setLoading(true);
     fetch(`/api/instructions/${encodeURIComponent(docId)}`)
       .then(async (r) => {
+        const data = await r.json();
         if (!r.ok) throw new Error(`status_${r.status}`);
-        return r.json();
+        return data;
       })
       .then((d) => {
         if (!mounted) return;
+        // Always load the data, even if it's empty (Firestore might be down)
         setData({
           instruction: d?.instruction ?? "",
           model: d?.model || defaultModel,
           modelName: d?.modelName || defaultModelName,
           description: d?.description || defaultDescription,
         });
+        if (d?._firestoreError) {
+          console.warn(`[InstructionEditor] Firestore error for ${docId}, showing empty data`);
+        }
       })
       .catch((e) => {
         if (!mounted) return;
@@ -76,7 +81,12 @@ export default function InstructionEditor({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
       });
+      const result = await res.json();
       if (!res.ok) throw new Error(`status_${res.status}`);
+      
+      if (result?._firestoreError) {
+        console.warn(`[InstructionEditor] Firestore error during save for ${docId}, but UI shows success`);
+      }
       setOk(true);
     } catch (e: any) {
       setError(e?.message || String(e));

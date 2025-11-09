@@ -15,25 +15,60 @@ export default function EventFeed({ runId }: { runId: string | null }) {
   const [events, setEvents] = useState<FeedEvent[]>([]);
   const [loading, setLoading] = useState(false);
   const timerRef = useRef<number | null>(null);
+  const startTimeRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (!runId) {
       setEvents([]);
       if (timerRef.current) window.clearInterval(timerRef.current);
       timerRef.current = null;
+      startTimeRef.current = null;
       return;
     }
+
+    // Set start time for timeout mechanism
+    startTimeRef.current = Date.now();
 
     const fetchOnce = async () => {
       try {
         setLoading(true);
+        console.log(`[EventFeed] Fetching events for runId: ${runId}`);
+
+        // Check for timeout (5 minutes max polling)
+        if (startTimeRef.current && Date.now() - startTimeRef.current > 5 * 60 * 1000) {
+          console.log(`[EventFeed] Polling timeout reached for runId: ${runId}, stopping polling`);
+          if (timerRef.current) {
+            window.clearInterval(timerRef.current);
+            timerRef.current = null;
+          }
+          return;
+        }
+
         const res = await fetch(`/api/agent-events?runId=${encodeURIComponent(runId)}&limit=200`, {
           cache: 'no-store',
         });
         const data = (await res.json()) as { items: FeedEvent[] };
-        setEvents(Array.isArray(data.items) ? data.items : []);
-      } catch {
-        // ignore
+        console.log(`[EventFeed] Received ${data.items?.length || 0} events:`, data);
+        const items = Array.isArray(data.items) ? data.items : [];
+        setEvents(items);
+
+        // Check if run is completed - stop polling
+        const lastEvent = items[items.length - 1];
+        if (lastEvent && (
+          lastEvent.status === 'completed' ||
+          lastEvent.status === 'error' ||
+          lastEvent.status === 'finished' ||
+          lastEvent.status === 'failed'
+        )) {
+          console.log(`[EventFeed] Run completed with status: ${lastEvent.status}, stopping polling`);
+          if (timerRef.current) {
+            window.clearInterval(timerRef.current);
+            timerRef.current = null;
+          }
+          return;
+        }
+      } catch (error) {
+        console.error(`[EventFeed] Error fetching events for ${runId}:`, error);
       } finally {
         setLoading(false);
       }
@@ -46,6 +81,7 @@ export default function EventFeed({ runId }: { runId: string | null }) {
     return () => {
       if (timerRef.current) window.clearInterval(timerRef.current);
       timerRef.current = null;
+      startTimeRef.current = null;
     };
   }, [runId]);
 
@@ -58,10 +94,10 @@ export default function EventFeed({ runId }: { runId: string | null }) {
         status === 'error'
           ? 'text-red-400'
           : status === 'completed'
-          ? 'text-emerald-400'
-          : status === 'started'
-          ? 'text-sky-400'
-          : 'text-zinc-300';
+            ? 'text-emerald-400'
+            : status === 'started'
+              ? 'text-sky-400'
+              : 'text-zinc-300';
       return { ...e, time, color };
     });
   }, [events]);

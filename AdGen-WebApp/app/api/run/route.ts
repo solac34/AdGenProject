@@ -1,10 +1,23 @@
-export async function POST() {
+export async function POST(request: Request) {
   const runId = `web-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+  // Parse request body for custom prompt and max_rounds
+  let requestBody;
+  try {
+    requestBody = await request.json();
+  } catch {
+    requestBody = {};
+  }
+
+  const prompt = requestBody.prompt || 'Do your segmentation task. Process pending users and return appropriate status.';
+  const maxRounds = requestBody.max_rounds || requestBody.maxRounds || 8;
 
   // Use the provided agents service URL
   const agentsUrl = process.env.AGENTS_SERVICE_URL || 'https://adgen-agents-710876076445.us-central1.run.app/run';
 
   console.log(`[run api] Starting agent run ${runId}, forwarding to ${agentsUrl}`);
+  console.log(`[run api] Prompt: ${prompt.substring(0, 100)}${prompt.length > 100 ? '...' : ''}`);
+  console.log(`[run api] Max rounds: ${maxRounds}`);
 
   try {
     const res = await fetch(agentsUrl, {
@@ -12,14 +25,15 @@ export async function POST() {
       headers: {
         'Content-Type': 'application/json',
         'X-Run-Id': runId,
+        'X-Api-Key': process.env.AGENTS_API_TOKEN || 'change-me	',
         ...(process.env.AGENTS_API_TOKEN ? { 'X-Api-Key': process.env.AGENTS_API_TOKEN } : {}),
       },
       body: JSON.stringify({
-        prompt: 'Do your segmentation task. Process pending users and return appropriate status.',
-        max_rounds: 8,
+        prompt,
+        max_rounds: maxRounds,
       }),
-      // Set a reasonable timeout for the initial request
-      signal: AbortSignal.timeout(30000), // 30 seconds
+      // Set a longer timeout for agent processing
+      signal: AbortSignal.timeout(120000), // 2 minutes
     });
 
     if (!res.ok) {
