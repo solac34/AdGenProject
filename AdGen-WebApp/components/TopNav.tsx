@@ -8,7 +8,8 @@ export default function TopNav() {
   const items = [
     { href: "/", label: "Dashboard" },
     { href: "/settings", label: "Agent Settings" },
-    { href: "/segmentations", label: "Segmentations" }
+    { href: "/segmentations", label: "Segmentations" },
+    { href: "/populate-data", label: "Populate Data" }
   ];
   const index =
     items.findIndex((i) => i.href === pathname || (i.href !== "/" && pathname.startsWith(i.href))) ?? 0;

@@ -25,18 +25,33 @@ const KEYFILE = process.env.GOOGLE_APPLICATION_CREDENTIALS || process.env.BQ_KEY
 const SA_JSON = process.env.GCP_SERVICE_ACCOUNT_JSON;
 
 // ============= CONFIGURATION =============
+// Allow overriding via environment variables for automation
+// SEED_TOTAL_USERS, SEED_ORDER_CHANCE, SEED_ANON_COUNT
+// SEED_US_SHARE, SEED_EU_SHARE, SEED_OTHER_SHARE (sum should be ~1.0)
 const CONFIG = {
-  totalUsers: 26,
+  totalUsers: Number(process.env.SEED_TOTAL_USERS || 26),
   minSessionsPerUser: 1,
   maxSessionsPerUser: 10,
-  orderChance: 0.25,
-  anonSessionCount: 20,
+  orderChance: Number(process.env.SEED_ORDER_CHANCE || 0.25),
+  anonSessionCount: Number(process.env.SEED_ANON_COUNT || 20),
   locationDistribution: {
-    us: 0.50,
-    eu: 0.40,
-    other: 0.10
+    us: Number(process.env.SEED_US_SHARE || 0.50),
+    eu: Number(process.env.SEED_EU_SHARE || 0.40),
+    other: Number(process.env.SEED_OTHER_SHARE || 0.10)
   }
 };
+// Normalize distribution if needed
+(() => {
+  const sum =
+    CONFIG.locationDistribution.us +
+    CONFIG.locationDistribution.eu +
+    CONFIG.locationDistribution.other;
+  if (sum > 0 && Math.abs(sum - 1.0) > 1e-6) {
+    CONFIG.locationDistribution.us /= sum;
+    CONFIG.locationDistribution.eu /= sum;
+    CONFIG.locationDistribution.other /= sum;
+  }
+})();
 
 // ============= HELPERS =============
 function buildFirestore() {
