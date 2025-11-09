@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { spawn } from 'child_process';
+import path from 'path';
+import fs from 'fs';
 
 export const runtime = 'nodejs';
 
@@ -35,10 +37,22 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(data, { status: 200 });
     }
 
-    // Fallback for monorepo local dev: spawn the script from adg-ecommerce
-    const monorepoCwd = process.cwd().replace(/AdGen-WebApp.*/,'AdGenProject/adg-ecommerce');
-    const child = spawn('node', ['scripts/seedMega.js'], {
-      cwd: monorepoCwd,
+    // Fallback for monorepo local dev:
+    // Prefer a local script in this app if present, otherwise use the adg-ecommerce script.
+    const cwd = process.cwd();
+    const localScript = path.resolve(cwd, 'scripts', 'seedMega.js');
+    const ecomScript = path.resolve(cwd, '..', 'adg-ecommerce', 'scripts', 'seedMega.js');
+    // Prefer ecommerce script which has its own dependencies; opt-in to local copy via env
+    const preferLocal = process.env.USE_LOCAL_WEBAPP_SEED === '1';
+    const scriptPath = preferLocal && fs.existsSync(localScript) ? localScript : ecomScript;
+    if (!fs.existsSync(scriptPath)) {
+      return NextResponse.json(
+        { success: false, error: `Seed script not found at ${scriptPath}` },
+        { status: 500 }
+      );
+    }
+    const child = spawn(process.execPath, [scriptPath], {
+      cwd: path.dirname(scriptPath),
       env: {
         ...process.env,
         SEED_TOTAL_USERS: String(totalUsers ?? ''),
