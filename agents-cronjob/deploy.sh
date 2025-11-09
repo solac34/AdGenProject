@@ -36,6 +36,7 @@ gcloud run deploy "${SERVICE_NAME}" \
   --concurrency "1" \
   --max-instances "1" \
   --set-env-vars "AGENTS_SERVICE_URL=https://adgen-agents-710876076445.us-central1.run.app" \
+  --set-env-vars "AGENTS_API_TOKEN=change-me" \
 
 echo "Deployed ${SERVICE_NAME} to ${REGION} in project ${PROJECT_ID}"
 echo "Configuring Cloud Scheduler to invoke this service hourly..."
