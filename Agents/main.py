@@ -76,6 +76,7 @@ setup_environment()
 from MasterAgent.agent import root_agent
 from google.adk.runners import InMemoryRunner
 from google.genai import types
+from webhook import report_progress
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -86,6 +87,22 @@ print(f"📊 Sub-agents: {[agent.name for agent in root_agent.sub_agents]}")
 
 # Create Flask app
 app = Flask(__name__)
+
+def _is_authorized(req) -> bool:
+    """Simple API token check. If AGENTS_API_TOKEN is unset, allow all."""
+    expected = os.getenv("AGENTS_API_TOKEN", "").strip()
+    if not expected:
+        return True
+    # Support either Authorization: Bearer <token> or X-Api-Key header
+    auth = req.headers.get("Authorization", "")
+    if auth.startswith("Bearer "):
+        token = auth[len("Bearer "):].strip()
+        if token and token == expected:
+            return True
+    api_key = req.headers.get("X-Api-Key") or req.headers.get("X-API-Key")
+    if api_key and api_key.strip() == expected:
+        return True
+    return False
 
 def extract_status(obj) -> Optional[str]:
     """Extract status from agent result."""
@@ -101,11 +118,13 @@ def extract_status(obj) -> Optional[str]:
     return None
 
 
-async def run_agent_with_rollover(prompt: str, max_rounds: int = 8) -> dict:
+async def run_agent_with_rollover(prompt: str, max_rounds: int = 8, run_id: Optional[str] = None) -> dict:
     """
     Run the master agent with session rollover.
     Uses agent cloning for fresh sessions to avoid context pollution.
     """
+    run_id = run_id or f"http-{uuid.uuid4().hex[:8]}"
+    report_progress(run_id=run_id, agent="MasterAgent", status="started", message="Run started")
     rounds = 0
     agent_instance = root_agent
     current_prompt = prompt
@@ -115,6 +134,7 @@ async def run_agent_with_rollover(prompt: str, max_rounds: int = 8) -> dict:
     while True:
         rounds += 1
         logger.info(f"🔄 Agent round {rounds}/{max_rounds}")
+        report_progress(run_id=run_id, agent="MasterAgent", status="progress", message=f"Round {rounds} started", step=str(rounds))
         
         # Create fresh session for each round
         session_id = f"http-{uuid.uuid4().hex[:8]}"
@@ -147,6 +167,7 @@ async def run_agent_with_rollover(prompt: str, max_rounds: int = 8) -> dict:
         
         except Exception as e:
             logger.error(f"❌ Error in round {rounds}: {e}", exc_info=True)
+            report_progress(run_id=run_id, agent="MasterAgent", status="error", message=str(e), step=str(rounds))
             return {
                 "error": str(e),
                 "rounds": rounds,
@@ -165,6 +186,7 @@ async def run_agent_with_rollover(prompt: str, max_rounds: int = 8) -> dict:
             statuses.append(status)
         
         logger.info(f"✅ Round {rounds} completed. Status: {status or 'n/a'}")
+        report_progress(run_id=run_id, agent="MasterAgent", status=status or "progress", message=f"Round {rounds} completed", step=str(rounds))
         
         # Check if we should continue
         if status.lower() == "continue" and rounds < max_rounds:
@@ -194,7 +216,8 @@ async def run_agent_with_rollover(prompt: str, max_rounds: int = 8) -> dict:
         "result": last_result,
         "rounds": rounds,
         "statuses": statuses,
-        "success": True
+        "success": True,
+        "run_id": run_id
     }
 
 
@@ -228,6 +251,9 @@ def run_agent():
     }
     """
     try:
+        if not _is_authorized(request):
+            return jsonify({"error": "unauthorized"}), 401
+
         data = request.get_json()
         
         if not data or 'prompt' not in data:
@@ -241,14 +267,16 @@ def run_agent():
         
         prompt = data['prompt']
         max_rounds = data.get('max_rounds', 8)
+        run_id = request.headers.get('X-Run-Id') or f"http-{uuid.uuid4().hex[:8]}"
         
         logger.info(f"📥 Received request: prompt='{prompt[:50]}...', max_rounds={max_rounds}")
         
         # Run agent asynchronously
-        result = asyncio.run(run_agent_with_rollover(prompt, max_rounds))
+        result = asyncio.run(run_agent_with_rollover(prompt, max_rounds, run_id=run_id))
         
         logger.info(f"📤 Request completed: rounds={result.get('rounds')}, success={result.get('success')}")
         
+        report_progress(run_id=run_id, agent="MasterAgent", status="completed", message="Run completed")
         return jsonify(result), 200
         
     except Exception as e:
