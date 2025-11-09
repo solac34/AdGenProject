@@ -1,9 +1,14 @@
 import os
 import json
+import logging
 from datetime import datetime, timezone
 
 import functions_framework
 import httpx
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 def _build_run_url(base_url: str) -> str:
@@ -31,7 +36,14 @@ def cronjob(request):
       - AGENTS_MAX_ROUNDS: Max rounds to request (default 8)
       - REQUEST_TIMEOUT_SECONDS: HTTP timeout in seconds (default 60)
     """
-
+    
+    # Health check endpoint
+    if request.path == '/health' or request.method == 'GET':
+        return (json.dumps({"status": "healthy", "timestamp": datetime.now(timezone.utc).isoformat()}), 
+                200, {"Content-Type": "application/json"})
+    
+    logger.info("Cronjob started")
+    
     try:
         agents_service_url = os.getenv("AGENTS_SERVICE_URL", "https://adgen-agents-710876076445.us-central1.run.app")
         run_url = _build_run_url(agents_service_url)
@@ -56,15 +68,22 @@ def cronjob(request):
         def call_agent(run_prompt: str):
             body_text = ""
             status_code_inner = 0
-            with httpx.Client(timeout=600.0) as client:
-                resp_inner = client.post(run_url, headers=headers, json={"prompt": run_prompt, "max_rounds": max_rounds})
-                body_text = resp_inner.text
-                status_code_inner = resp_inner.status_code
             try:
-                parsed = json.loads(body_text)
-            except Exception:
-                parsed = {"raw_body": body_text}
-            return status_code_inner, parsed
+                with httpx.Client(timeout=600.0) as client:
+                    resp_inner = client.post(run_url, headers=headers, json={"prompt": run_prompt, "max_rounds": max_rounds})
+                    body_text = resp_inner.text
+                    status_code_inner = resp_inner.status_code
+                try:
+                    parsed = json.loads(body_text)
+                except Exception:
+                    parsed = {"raw_body": body_text}
+                return status_code_inner, parsed
+            except httpx.TimeoutException:
+                return 408, {"error": "Request timeout", "raw_body": ""}
+            except httpx.RequestError as e:
+                return 500, {"error": f"Request error: {str(e)}", "raw_body": ""}
+            except Exception as e:
+                return 500, {"error": f"Unexpected error: {str(e)}", "raw_body": ""}
 
         def extract_status_from_body(resp_body):
             res_obj = {}
@@ -167,6 +186,7 @@ def cronjob(request):
         return (json.dumps(result), status_code, {"Content-Type": "application/json"})
 
     except Exception as e:
+        logger.error(f"Cronjob failed with error: {str(e)}", exc_info=True)
         error_body = {
             "ok": False,
             "error": str(e),
