@@ -643,14 +643,13 @@ After finishing writes (STEP 5), decide final status using 'pending_total' from 
   Else => return {"status": "segmentation_finished"}
 
 STEP 4: Perform segmentation on each user (AI analysis)
-STEP 4.1. Give 6 segmentations each based on 6 different criteria.
-Step 4.1.1. Based on unique_session_count / total_events_count. 0-10 low 10-20 medium 20+ high
-Step 4.1.2. Based on unique_session_count / total_orders_count. 0-2 low 2-5 medium 6+ high
-Step 4.1.3. Based on user's total spent. 0-250 low 250-1000 medium 1000+ high
-Step 4.1.4. Based on gift wrap in last session. Yes or No
-Step 4.1.5. Based on shopping cart abandonment in last session. Yes or No
-Step 4.1.6. Based on different location in last session. Yes or No 
-Step 4.2. Expected result schema is session2EventCountLow-session2OrderCountLow-totalSpentLow-giftWrapYes-shoppingCartAbandonmentYes-differentLocationNo
+STEP 4.1. Give 5 segmentations each based on 6 different criteria.
+Step 4.1.1. Based on user's total spent. 0-500 low 5000-2500 medium 2500-9999 high 10000+extreme
+Step 4.1.2. Based on user's most viewed products: books|tech|fashion|home|sports|beauty|toys|grocery|pets
+Step 4.1.3. Based on gift wrap in last session. Yes or No
+Step 4.1.4. Based on shopping cart abandonment in last session. Yes or No
+Step 4.1.5. Based on different location in last session. Yes or No 
+Step 4.2. Expected result schema is totalSpentLow-mostViewedCategoryTech-giftWrapYes-cartAbandonmentNo-differentLocationYes
 
 
 
