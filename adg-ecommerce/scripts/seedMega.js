@@ -16,7 +16,8 @@ const { Firestore } = require('@google-cloud/firestore');
 const { BigQuery } = require('@google-cloud/bigquery');
 
 const PROJECT_ID = process.env.GCP_PROJECT_ID || 'eighth-upgrade-475017-u5';
-const FIRESTORE_DB_ID = process.env.FIRESTORE_DB_ID || 'adgen-db';
+// Use default Firestore database unless explicitly overridden
+const FIRESTORE_DB_ID = process.env.FIRESTORE_DB_ID || '(default)';
 const DATASET = process.env.BQ_DATASET || 'adgen_bq';
 const EVENTS_TABLE = process.env.BQ_EVENTS_TABLE || 'user_events';
 const ORDERS_TABLE = process.env.BQ_ORDERS_TABLE || 'user_orders';
@@ -481,6 +482,7 @@ async function main() {
   console.log(`      2 Kategori (dev:1): ${categoryStats.twoCategories} (%${(categoryStats.twoCategories / users.length * 100).toFixed(1)})\n`);
 
   console.log('💾 Kullanıcılar Firestore\'a yazılıyor...');
+  let fsErrors = 0;
   const userBatchSize = 500;
   for (let i = 0; i < users.length; i += userBatchSize) {
     const batch = firestore.batch();
@@ -495,10 +497,14 @@ async function main() {
         createdAt: isoDatetime(u.createdAt)
       }, { merge: true });
     });
-    await batch.commit();
-
-    if ((i + userBatchSize) % 1000 === 0 || (i + userBatchSize) >= users.length) {
-      console.log(`   ${Math.min(i + userBatchSize, users.length)}/${users.length} kullanıcı yazıldı`);
+    try {
+      await batch.commit();
+      if ((i + userBatchSize) % 1000 === 0 || (i + userBatchSize) >= users.length) {
+        console.log(`   ${Math.min(i + userBatchSize, users.length)}/${users.length} kullanıcı yazıldı`);
+      }
+    } catch (err) {
+      fsErrors += 1;
+      console.error('   ❌ Firestore batch error:', err?.message || err);
     }
   }
   console.log('   ✓ Firestore yazma tamamlandı\n');
@@ -626,6 +632,7 @@ async function main() {
   console.log('💾 PHASE 4: BigQuery\'e veriler yazılıyor...\n');
 
   // Orders
+  let bqOrderErrors = 0;
   if (allOrders.length > 0) {
     console.log(`🛒 ${allOrders.length} sipariş yazılıyor...`);
     const orderBatchSize = 500;
@@ -637,12 +644,14 @@ async function main() {
           console.log(`   ✓ ${Math.min(i + orderBatchSize, allOrders.length)}/${allOrders.length} sipariş yazıldı`);
         }
       } catch (err) {
-        console.error(`   ❌ Hata (batch ${i}-${i + orderBatchSize}):`, err?.errors?.[0]?.errors?.[0] || err.message);
+        bqOrderErrors += 1;
+        console.error(`   ❌ BigQuery orders insert error (batch ${i}-${i + orderBatchSize}):`, err?.errors?.[0]?.errors?.[0] || err?.message || err);
       }
     }
   }
 
   // Events
+  let bqEventErrors = 0;
   console.log(`\n📊 ${allEvents.length} event yazılıyor...`);
   const eventBatchSize = 2000;
   for (let i = 0; i < allEvents.length; i += eventBatchSize) {
@@ -653,7 +662,8 @@ async function main() {
         console.log(`   ✓ ${Math.min(i + eventBatchSize, allEvents.length)}/${allEvents.length} event yazıldı`);
       }
     } catch (err) {
-      console.error(`   ❌ Hata (batch ${i}-${i + eventBatchSize}):`, err?.errors?.[0]?.errors?.[0] || err.message);
+      bqEventErrors += 1;
+      console.error(`   ❌ BigQuery events insert error (batch ${i}-${i + eventBatchSize}):`, err?.errors?.[0]?.errors?.[0] || err?.message || err);
     }
   }
 
@@ -676,7 +686,15 @@ async function main() {
   console.log(`   ✓ Signup öncesi tüm eventler anonymous`);
   console.log(`   ✓ Signup sonrası tüm eventler user_id ile`);
   console.log(`   ✓ Kullanıcı başına kategori deviation: min:0 max:1 (hedef: %70 tek kategori)`);
-  console.log('='.repeat(80) + '\n');
+  console.log('='.repeat(80));
+  if (fsErrors || bqOrderErrors || bqEventErrors) {
+    console.error(`❌ SEED COMPLETED WITH ERRORS: firestore=${fsErrors}, bqOrders=${bqOrderErrors}, bqEvents=${bqEventErrors}`);
+    // Throw to make exit code non-zero for API caller visibility
+    throw new Error('Seed completed with errors');
+  } else {
+    console.log('✅ SEED COMPLETED WITHOUT ERRORS');
+  }
+  console.log('\n');
 }
 
 main().catch(err => {

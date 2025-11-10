@@ -22,7 +22,7 @@ WEBHOOK_SECRET="${WEBHOOK_SECRET:-change-me}"
 AGENTS_SERVICE_URL="${AGENTS_SERVICE_URL:-https://adgen-agents-710876076445.us-central1.run.app/run}"
 AGENTS_API_TOKEN="${AGENTS_API_TOKEN:-change-me}"
 # If not provided, try to discover the ecommerce service URL automatically
-ECOMMERCE_SERVICE_URL="${ECOMMERCE_SERVICE_URL:-}"
+ECOMMERCE_SERVICE_URL="${ECOMMERCE_SERVICE_URL:-https://adgen-ecommerce-710876076445.us-central1.run.app}"
 
 echo -e "${BLUE}🚀 AdGen WebApp Cloud Run Deployment${NC}"
 echo "====================================="
@@ -71,15 +71,7 @@ gcloud builds submit --tag $IMAGE_NAME .
 
 # Deploy to Cloud Run
 echo -e "${BLUE}🚀 Deploying to Cloud Run...${NC}"
-# Try to auto-detect ecommerce URL if not supplied
-if [ -z "$ECOMMERCE_SERVICE_URL" ]; then
-    if gcloud run services describe adgen-ecommerce --region "$REGION" --format='value(status.url)' >/dev/null 2>&1; then
-        ECOMMERCE_SERVICE_URL="$(gcloud run services describe adgen-ecommerce --region "$REGION" --format='value(status.url)')"
-        echo -e "${YELLOW}ℹ️  Discovered ECOMMERCE_SERVICE_URL: ${ECOMMERCE_SERVICE_URL}${NC}"
-    else
-        echo -e "${YELLOW}⚠️  Could not auto-detect ECOMMERCE_SERVICE_URL. You can set it via env before running this script.${NC}"
-    fi
-fi
+# ECOMMERCE_SERVICE_URL is explicitly set above; skip auto-discovery
 gcloud run deploy $SERVICE_NAME \
     --image $IMAGE_NAME \
     --platform managed \

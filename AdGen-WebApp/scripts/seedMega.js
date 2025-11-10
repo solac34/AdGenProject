@@ -435,6 +435,8 @@ async function main() {
 
   const firestore = buildFirestore();
   const bq = buildBQ();
+  console.log(`[seedmega] Firestore Project: ${PROJECT_ID}, Database: ${FIRESTORE_DB_ID}`);
+  console.log(`[seedmega] BigQuery Project: ${PROJECT_ID}, Dataset: ${DATASET}, Tables: events=${EVENTS_TABLE}, orders=${ORDERS_TABLE}`);
 
   console.log('📦 Ürün katalogu yükleniyor...');
   const catalog = await getCatalog(firestore);
@@ -482,6 +484,7 @@ async function main() {
 
   console.log('💾 Kullanıcılar Firestore\'a yazılıyor...');
   const userBatchSize = 500;
+  let fsErrors = 0;
   for (let i = 0; i < users.length; i += userBatchSize) {
     const batch = firestore.batch();
     users.slice(i, i + userBatchSize).forEach(u => {
@@ -495,10 +498,14 @@ async function main() {
         createdAt: isoDatetime(u.createdAt)
       }, { merge: true });
     });
-    await batch.commit();
-
-    if ((i + userBatchSize) % 1000 === 0 || (i + userBatchSize) >= users.length) {
-      console.log(`   ${Math.min(i + userBatchSize, users.length)}/${users.length} kullanıcı yazıldı`);
+    try {
+      await batch.commit();
+      if ((i + userBatchSize) % 1000 === 0 || (i + userBatchSize) >= users.length) {
+        console.log(`   ${Math.min(i + userBatchSize, users.length)}/${users.length} kullanıcı yazıldı`);
+      }
+    } catch (err) {
+      fsErrors += 1;
+      console.error('   ❌ Firestore batch error:', err?.message || err);
     }
   }
   console.log('   ✓ Firestore yazma tamamlandı\n');
@@ -643,6 +650,7 @@ async function main() {
   }
 
   // Events
+  let bqEventErrors = 0;
   console.log(`\n📊 ${allEvents.length} event yazılıyor...`);
   const eventBatchSize = 2000;
   for (let i = 0; i < allEvents.length; i += eventBatchSize) {
@@ -653,6 +661,7 @@ async function main() {
         console.log(`   ✓ ${Math.min(i + eventBatchSize, allEvents.length)}/${allEvents.length} event yazıldı`);
       }
     } catch (err) {
+      bqEventErrors += 1;
       console.error(`   ❌ Hata (batch ${i}-${i + eventBatchSize}):`, err?.errors?.[0]?.errors?.[0] || err.message);
     }
   }
@@ -676,7 +685,14 @@ async function main() {
   console.log(`   ✓ Signup öncesi tüm eventler anonymous`);
   console.log(`   ✓ Signup sonrası tüm eventler user_id ile`);
   console.log(`   ✓ Kullanıcı başına kategori deviation: min:0 max:1 (hedef: %70 tek kategori)`);
-  console.log('='.repeat(80) + '\n');
+  console.log('='.repeat(80));
+  if (fsErrors || bqEventErrors) {
+    console.error(`❌ SEED COMPLETED WITH ERRORS: firestore=${fsErrors}, bqEvents=${bqEventErrors}`);
+    throw new Error('Seed completed with errors');
+  } else {
+    console.log('✅ SEED COMPLETED WITHOUT ERRORS');
+  }
+  console.log('\n');
 }
 
 main().catch(err => {

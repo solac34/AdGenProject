@@ -20,6 +20,7 @@ export async function POST(request: Request) {
     const cwd = process.cwd(); // adg-ecommerce root in this service/container
     const scriptPath = path.join(cwd, "scripts", "seedMega.js");
     const child = spawn(process.execPath, [scriptPath], {
+      cwd: cwd, // Explicitly use project root so node_modules is accessible
       env: {
         ...process.env,
         SEED_TOTAL_USERS: String(totalUsers ?? ""),
@@ -39,8 +40,15 @@ export async function POST(request: Request) {
       child.on("close", resolve);
     });
 
+    if (code !== 0) {
+      return NextResponse.json(
+        { success: false, code, output },
+        { status: 500 }
+      );
+    }
+
     return NextResponse.json(
-      { success: code === 0, code, output },
+      { success: true, code, output },
       { status: 200 }
     );
   } catch (e: any) {

@@ -10,6 +10,9 @@
   },
   "dependencies": {
     "@google-cloud/firestore": "^7.11.6",
+    "@google-cloud/bigquery": "^7.7.0",
+    "@faker-js/faker": "^8.4.1",
+    "bcryptjs": "^2.4.3",
     "firebase": "^10.7.1",
     "clsx": "2.1.1",
     "framer-motion": "11.11.17",

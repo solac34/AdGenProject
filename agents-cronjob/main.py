@@ -60,7 +60,7 @@ async def cronjob_async(request):
         logger.info(f"🎯 Target URL: {run_url}")
 
         # NOTE: Avoid trailing comma (tuple); ensure prompt is a string
-        prompt = "Do your segmentation task."
+        prompt = "Do your segmentation task starting from retrieving event counts."
         max_rounds = 8
         token = (os.getenv("AGENTS_API_TOKEN") or "").strip()
         logger.info(f"🔑 API Token configured: {'Yes' if token else 'No'}")

@@ -7,13 +7,15 @@ WORKDIR /app
 
 # Copy package files
 COPY package*.json ./
-RUN npm ci --only=production
+# Use npm install to generate/update lockfile in container
+RUN npm install --omit=dev
 
 # Build the app
 FROM base AS builder
 WORKDIR /app
 COPY package*.json ./
-RUN npm ci
+# Install all deps (including dev) for building
+RUN npm install
 COPY . .
 
 # Ensure public directory exists
@@ -37,6 +39,9 @@ COPY --from=builder /app/public ./public
 # Copy built application
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+# Ensure runtime has production dependencies and scripts folder for seeders
+COPY --from=deps --chown=nextjs:nodejs /app/node_modules ./node_modules
+COPY --from=builder --chown=nextjs:nodejs /app/scripts ./scripts
 
 USER nextjs
 

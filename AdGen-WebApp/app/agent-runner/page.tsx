@@ -22,10 +22,12 @@ type RunResult = {
 
 export default function AgentRunnerPage() {
   const TOTAL_EVENTS = 22;
+  const PROGRESS_CAP = 95; // Slow-fill target before completion
   const [isRunning, setIsRunning] = useState(false);
   const [runId, setRunId] = useState<string | null>(null);
   const [events, setEvents] = useState<AgentEvent[]>([]);
   const [progressPercent, setProgressPercent] = useState<number>(0);
+  const [showStatus, setShowStatus] = useState<boolean>(false);
   const [prompt, setPrompt] = useState('Do your segmentation task. Process pending users and return appropriate status.');
   const [maxRounds, setMaxRounds] = useState(8);
   const [result, setResult] = useState<any>(null);
@@ -182,7 +184,7 @@ export default function AgentRunnerPage() {
     };
   }, [runId, isRunning]);
 
-  // Fake progress ticker (show-only). While running, smoothly increases up to 96%.
+  // Fake progress ticker (show-only). While running, smoothly increases up to PROGRESS_CAP with easing.
   useEffect(() => {
     if (!isRunning) {
       if (fakeTickerRef.current) {
@@ -194,13 +196,22 @@ export default function AgentRunnerPage() {
     if (fakeTickerRef.current) return;
     fakeTickerRef.current = setInterval(() => {
       setProgressPercent((p) => {
-        if (p >= 96) return p; // cap until terminal
-        // increase by 0.5% - 2.0%
-        const inc = 0.5 + Math.random() * 1.5;
-        const next = Math.min(96, p + inc);
+        if (p >= PROGRESS_CAP) return p; // cap until terminal
+        // Easing: larger steps early, tiny steps near the cap
+        let inc: number;
+        if (p < 50) {
+          inc = 0.8 + Math.random() * 0.8; // 0.8% - 1.6%
+        } else if (p < 85) {
+          inc = 0.4 + Math.random() * 0.4; // 0.4% - 0.8%
+        } else {
+          inc = 0.12 + Math.random() * 0.13; // 0.12% - 0.25%
+        }
+        // Small chance to skip a tick near the end to avoid rushing to the cap
+        if (p > 90 && Math.random() < 0.25) return p;
+        const next = Math.min(PROGRESS_CAP, p + inc);
         return next;
       });
-    }, 600);
+    }, 900);
     return () => {
       if (fakeTickerRef.current) {
         clearInterval(fakeTickerRef.current);
@@ -257,11 +268,12 @@ export default function AgentRunnerPage() {
     setProgressPercent(0);
     setResult(null);
     setIsRunning(true); // start UI immediately
+    setShowStatus(true);
 
     try {
       // Seed demo data first
       try {
-        await fetch('/api/seedmega', {
+        const seedResp = await fetch('/api/seedmega', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -273,6 +285,11 @@ export default function AgentRunnerPage() {
             otherShare: 0,
           }),
         });
+        const seedData = await seedResp.json().catch(() => ({}));
+        console.log('[AgentRunnerPage] seedmega response:', seedData);
+        if (!seedResp.ok || seedData?.ok === false) {
+          setCronMessage(`Seedmega failed: status ${seedResp.status}`);
+        }
       } catch {}
 
       // Dümdüz cronjob'ı tetikle, cronjob her şeyi halleder
@@ -314,6 +331,34 @@ export default function AgentRunnerPage() {
       default: return 'text-gray-400 bg-gray-400/10';
     }
   };
+
+  // Human-readable phase based on progress percent
+  const phaseLabels = [
+    'Retrieving Latest Activity',
+    'Comparing Activity Counts',
+    'Writing new latest activity to Firestore',
+    'Checking users to segmentate',
+    'Segmentating users',
+    'Writing segmentation results',
+    'Checking segmentations to create a content',
+    'Creating content',
+  ];
+
+  const getPhaseIndex = (pct: number) => {
+    if (pct <= 7) return 0;      // 1-7
+    if (pct <= 15) return 1;     // 8-15
+    if (pct <= 20) return 2;     // 16-20
+    if (pct <= 30) return 3;     // 20-30
+    if (pct <= 60) return 4;     // 30-60
+    if (pct <= 65) return 5;     // 61-65
+    if (pct <= 72) return 6;     // 65-72
+    return 7;                    // 72-100 (pre-terminal)
+  };
+
+  const currentPhaseText = (() => {
+    if (progressPercent >= 100) return 'DONE';
+    return phaseLabels[getPhaseIndex(progressPercent)] || 'Starting';
+  })();
 
   const formatTimestamp = (timestamp: number) => {
     return new Date(timestamp).toLocaleTimeString('tr-TR', {
@@ -408,7 +453,21 @@ export default function AgentRunnerPage() {
                     style={{ width: `${progressPercent}%` }}
                   />
                 </div>
-                {/* Intentionally hide event count */}
+                {/* Status pill (visible after pressing the button) */}
+                {showStatus && (
+                  <div className="mt-3 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-zinc-200">
+                    {progressPercent >= 100 ? (
+                      // Check icon
+                      <svg className="h-3.5 w-3.5 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                      </svg>
+                    ) : (
+                      // Spinner
+                      <span className="inline-block h-3.5 w-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    )}
+                    <span className="truncate max-w-[70vw] sm:max-w-none">{currentPhaseText}</span>
+                  </div>
+                )}
               </div>
 
               {/* Events List - hidden until first event arrives */}
