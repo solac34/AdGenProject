@@ -6,7 +6,7 @@ import { track } from "@/lib/track";
 
 export default function Navbar({ categories }: { categories: Category[] }) {
   return (
-    <nav className="navbar" aria-label="Kategoriler">
+    <nav className="navbar" aria-label="Categories">
       {categories.map((c) => (
         <Link
           key={c.id}

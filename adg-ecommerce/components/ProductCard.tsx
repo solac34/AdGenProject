@@ -16,7 +16,7 @@ export default function ProductCard({ product }: { product: Product }) {
 
   const onAdd = () => {
     add(product, 1);
-    show("Sepete eklendi");
+    show("Added to cart");
   };
 
   const onShare = async () => {
@@ -25,7 +25,7 @@ export default function ProductCard({ product }: { product: Product }) {
       await navigator.clipboard.writeText(url);
       track("product_share", { productId: product.id });
       // eslint-disable-next-line no-alert
-      alert("Bağlantı panoya kopyalandı");
+      alert("Link copied to clipboard");
     } catch {
       track("product_share_failed", { productId: product.id });
     }

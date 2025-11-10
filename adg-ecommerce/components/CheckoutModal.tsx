@@ -33,7 +33,7 @@ export default function CheckoutModal({
     const cvvDigits = cvv.replace(/\D/g, "");
     const expOk = /^\d{2}\/\d{2}$/.test(exp);
     if (!name || digits.length !== 16 || !expOk || cvvDigits.length !== 3) {
-      setError("Kart bilgileri geçersiz. Lütfen kontrol edin.");
+      setError("Card information is invalid. Please check.");
       track("checkout_validation_failed");
       return;
     }
@@ -70,34 +70,34 @@ export default function CheckoutModal({
       console.error("[order API error]", err);
     }
 
-    show("Ödeme onaylandı ✔");
+    show("Payment approved ✔");
     track("checkout_success", { amountCents, products: productsPayload });
     clear();
     onClose();
   };
 
-  const formatPrice = (cents: number) => new Intl.NumberFormat("tr-TR", { style: "currency", currency: "TRY" }).format(cents / 100);
+  const formatPrice = (cents: number) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(cents / 100);
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h2 style={{ marginTop: 0 }}>Ödeme</h2>
-        <p style={{ color: "#6b7280" }}>Bu bir demo ödemesidir. Rastgele bilgiler kullanılabilir.</p>
+        <h2 style={{ marginTop: 0 }}>Payment</h2>
+        <p style={{ color: "#6b7280" }}>This is a demo payment. Random details are acceptable.</p>
         <form onSubmit={onPay} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          <input placeholder="Kart Sahibinin Adı" value={name} onChange={(e) => setName(e.target.value)} style={{ padding: 12, border: "1px solid #e5e7eb", borderRadius: 8 }} />
-          <input placeholder="Kart Numarası (16 hane)" value={card} onChange={(e) => setCard(e.target.value)} style={{ padding: 12, border: "1px solid #e5e7eb", borderRadius: 8 }} />
+          <input placeholder="Cardholder Name" value={name} onChange={(e) => setName(e.target.value)} style={{ padding: 12, border: "1px solid #e5e7eb", borderRadius: 8 }} />
+          <input placeholder="Card Number (16 digits)" value={card} onChange={(e) => setCard(e.target.value)} style={{ padding: 12, border: "1px solid #e5e7eb", borderRadius: 8 }} />
           <div style={{ display: "flex", gap: 12 }}>
-            <input placeholder="SKT (MM/YY)" value={exp} onChange={(e) => setExp(e.target.value)} style={{ flex: 1, padding: 12, border: "1px solid #e5e7eb", borderRadius: 8 }} />
+            <input placeholder="Expiry (MM/YY)" value={exp} onChange={(e) => setExp(e.target.value)} style={{ flex: 1, padding: 12, border: "1px solid #e5e7eb", borderRadius: 8 }} />
             <input placeholder="CVV (3)" value={cvv} onChange={(e) => setCvv(e.target.value)} style={{ width: 120, padding: 12, border: "1px solid #e5e7eb", borderRadius: 8 }} />
           </div>
           <div className="row" style={{ marginTop: 4 }}>
-            <div>Ödenecek Tutar</div>
+            <div>Amount to Pay</div>
             <strong>{formatPrice(amountCents)}</strong>
           </div>
           {error && <div style={{ color: "#b91c1c" }}>{error}</div>}
           <div className="row" style={{ marginTop: 8 }}>
-            <button type="button" className="button" onClick={onClose}>İptal</button>
-            <button type="submit" className="button primary">Ödemeyi Tamamla</button>
+            <button type="button" className="button" onClick={onClose}>Cancel</button>
+            <button type="submit" className="button primary">Complete Payment</button>
           </div>
         </form>
       </div>

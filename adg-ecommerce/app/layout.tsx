@@ -7,12 +7,12 @@ import { ToastProvider } from "@/components/ToastProvider";
 
 export const metadata = {
   title: "ADG E-commerce",
-  description: "Her şeyin satıldığı minimal e-ticaret deneyimi"
+  description: "A minimal e-commerce experience where everything is sold"
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="tr">
+    <html lang="en">
       <body>
         <AuthProvider>
           <CartProvider>

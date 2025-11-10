@@ -51,7 +51,7 @@ export default function CartPage() {
           );
         })}
         <div className="row" style={{ marginTop: 12 }}>
-          <div style={{ fontWeight: 700 }}>Toplam: {formatPrice(totalCents)}</div>
+          <div style={{ fontWeight: 700 }}>Total: {formatPrice(totalCents)}</div>
           <div style={{ display: "flex", gap: 8 }}>
             <a className="button" href="/" onClick={() => track("continue_shopping_click")}>Continue Shopping</a>
             <button

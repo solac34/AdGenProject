@@ -14,8 +14,8 @@ export default function SignupPage() {
 
   return (
     <div style={{ maxWidth: 420, margin: "64px auto" }}>
-      <h1 style={{ marginBottom: 8 }}>Kayıt Ol</h1>
-      <p style={{ color: "#6b7280", marginTop: 0 }}>Demo: Basit kayıt akışı, bilgiler yerel olarak saklanır.</p>
+      <h1 style={{ marginBottom: 8 }}>Sign Up</h1>
+      <p style={{ color: "#6b7280", marginTop: 0 }}>Demo: Simple sign-up flow; data is stored locally.</p>
       <form
         onSubmit={async (e) => {
           e.preventDefault();
@@ -24,16 +24,16 @@ export default function SignupPage() {
             await signup(name, email, password);
             router.push("/");
           } catch (err: any) {
-            setError(err?.message || "Kayıt olunamadı");
+            setError(err?.message || "Sign up failed");
           }
         }}
         style={{ display: "flex", flexDirection: "column", gap: 12 }}
       >
-        <input placeholder="Ad Soyad" value={name} onChange={(e) => setName(e.target.value)} style={{ padding: 12, border: "1px solid #e5e7eb", borderRadius: 8 }} />
+        <input placeholder="Full Name" value={name} onChange={(e) => setName(e.target.value)} style={{ padding: 12, border: "1px solid #e5e7eb", borderRadius: 8 }} />
         <input placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} style={{ padding: 12, border: "1px solid #e5e7eb", borderRadius: 8 }} />
-        <input type="password" placeholder="Şifre" value={password} onChange={(e) => setPassword(e.target.value)} style={{ padding: 12, border: "1px solid #e5e7eb", borderRadius: 8 }} />
+        <input type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} style={{ padding: 12, border: "1px solid #e5e7eb", borderRadius: 8 }} />
         {error && <div style={{ color: "#b91c1c" }}>{error}</div>}
-        <button className="button primary" type="submit">Kayıt Ol</button>
+        <button className="button primary" type="submit">Sign Up</button>
       </form>
     </div>
   );

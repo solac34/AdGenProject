@@ -41,7 +41,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       });
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
-        throw new Error(j?.error === "user_not_found" ? "Kullanıcı bulunamadı" : "Geçersiz e-posta veya şifre");
+        throw new Error(j?.error === "user_not_found" ? "User not found" : "Invalid email or password");
       }
       const j = await res.json();
       const next: AdgUser = j.user;
@@ -67,8 +67,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         });
       if (!up.ok) {
         const j = await up.json().catch(() => ({}));
-        if (j?.error === "email_exists") throw new Error("Bu e‑posta ile bir hesap zaten var");
-        throw new Error("Kayıt başarısız");
+        if (j?.error === "email_exists") throw new Error("An account with this email already exists");
+        throw new Error("Signup failed");
       }
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
       setUser(next);
@@ -89,7 +89,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
 export function useAuth() {
   const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error("useAuth sadece AuthProvider içinde kullanılabilir");
+  if (!ctx) throw new Error("useAuth must be used within AuthProvider");
   return ctx;
 }
 

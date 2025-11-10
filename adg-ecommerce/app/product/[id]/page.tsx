@@ -14,7 +14,7 @@ export default function ProductDetailPage() {
   const product = getProductById(params.id);
   const { add } = useCart();
 
-  if (!product) return <div>Ürün bulunamadı.</div>;
+  if (!product) return <div>Product not found.</div>;
 
   return (
     <div>
@@ -36,7 +36,7 @@ export default function ProductDetailPage() {
                 track("product_add_from_detail", { product_id: product.id });
               }}
             >
-              Sepete Ekle
+              Add to Cart
             </button>
             <button
               className="button"
@@ -46,7 +46,7 @@ export default function ProductDetailPage() {
                   await navigator.clipboard.writeText(url);
                   track("product_share", { product_id: product.id });
                   // eslint-disable-next-line no-alert
-                  alert("Bağlantı panoya kopyalandı");
+                  alert("Link copied to clipboard");
                 } catch {
                   track("product_share_failed", { product_id: product.id });
                 }

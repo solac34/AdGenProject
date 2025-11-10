@@ -13,8 +13,8 @@ export default function LoginPage() {
 
   return (
     <div style={{ maxWidth: 420, margin: "64px auto" }}>
-      <h1 style={{ marginBottom: 8 }}>Giriş Yap</h1>
-      <p style={{ color: "#6b7280", marginTop: 0 }}>Demo: Herhangi bir email/şifre kabul edilir.</p>
+      <h1 style={{ marginBottom: 8 }}>Log In</h1>
+      <p style={{ color: "#6b7280", marginTop: 0 }}>Demo: Any email/password is accepted.</p>
       <form
         onSubmit={async (e) => {
           e.preventDefault();
@@ -23,15 +23,15 @@ export default function LoginPage() {
             await login(email, password);
             router.push("/");
           } catch (err: any) {
-            setError(err?.message || "Giriş yapılamadı");
+            setError(err?.message || "Login failed");
           }
         }}
         style={{ display: "flex", flexDirection: "column", gap: 12 }}
       >
         <input placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} style={{ padding: 12, border: "1px solid #e5e7eb", borderRadius: 8 }} />
-        <input type="password" placeholder="Şifre" value={password} onChange={(e) => setPassword(e.target.value)} style={{ padding: 12, border: "1px solid #e5e7eb", borderRadius: 8 }} />
+        <input type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} style={{ padding: 12, border: "1px solid #e5e7eb", borderRadius: 8 }} />
         {error && <div style={{ color: "#b91c1c" }}>{error}</div>}
-        <button className="button primary" type="submit">Giriş</button>
+        <button className="button primary" type="submit">Log In</button>
       </form>
     </div>
   );
